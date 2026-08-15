@@ -387,3 +387,161 @@
 			);
 		}
 		//#endregion
+
+		//#region AgentCard
+		function makeAgentCard(ctx) {
+			return function AgentCard(props) {
+				const sessionId = props.sessionId;
+				const catalog = props.useSessions((s) => (sessionId === undefined ? undefined : s.subagentsByParent?.[sessionId]));
+				const [open, setOpen] = useState(false);
+				const rootRef = useRef(null);
+				useEffect(() => {
+					if (!open) return;
+					const onDown = (event) => {
+						if (rootRef.current !== null && !rootRef.current.contains(event.target)) setOpen(false);
+					};
+					document.addEventListener("mousedown", onDown, true);
+					return () => document.removeEventListener("mousedown", onDown, true);
+				}, [open]);
+				const entries = (catalog?.entries ?? []).filter((e) => e.kind === "child");
+				if (entries.length === 0) return null;
+				const runningCount = entries.filter((e) => e.activity === "running").length;
+				const sessionsService = ctx.get("sessions");
+				const openChild = (entry) => {
+					if (sessionsService === undefined) return;
+					try {
+						sessionsService.openSubagent({ parentSessionId: sessionId, childSessionId: entry.id, mode: entry.mode });
+					} catch { /* navigation is best-effort */ }
+				};
+				return h("div", { className: "ccx-agents", ref: rootRef },
+					h("button", {
+						type: "button",
+						className: "ccx-agents-pill",
+						title: "本会话使用的子智能体",
+						onClick: () => setOpen((v) => !v),
+					},
+						h("span", null, "🤖"),
+						h("span", { className: "ccx-agents-count" }, String(entries.length)),
+						h("span", null, "智能体"),
+						runningCount > 0 ? h("span", { className: "ccx-agents-run", title: runningCount + " 个运行中" }) : null,
+					),
+					open ? h("div", { className: "ccx-agents-pop" },
+						h("div", { className: "ccx-git-pop-title" }, "子智能体 · " + entries.length + " 个" + (runningCount > 0 ? " · " + runningCount + " 运行中" : "")),
+						entries.map((entry) => h("button", {
+							key: entry.id,
+							type: "button",
+							className: "ccx-agent-row",
+							onClick: () => openChild(entry),
+						},
+							h("span", { className: "ccx-agent-dot" + (entry.activity === "running" ? " running" : "") }),
+							h("span", { className: "ccx-agent-label" }, entry.label ?? entry.id.slice(0, 8)),
+							h("span", { className: "ccx-agent-mode" }, entry.mode === "continuable" ? "可续" : "单次"),
+						)),
+					) : null,
+				);
+			};
+		}
+		//#endregion
+
+		//#region Pet
+		/** Module-level pet state store: a session-scoped bridge writes, the root-scoped widget reads. */
+		const petStore = {
+			state: { kind: "idle", detail: "" },
+			listeners: new Set(),
+			set(kind, detail) {
+				if (this.state.kind === kind && this.state.detail === detail) return;
+				this.state = { kind, detail };
+				for (const listener of [...this.listeners]) { try { listener(); } catch { /* listener error */ } }
+			},
+			get: function get() { return this.state; },
+			subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+		};
+		const PET_COPY = {
+			idle: { text: "空闲中" },
+			thinking: { text: "思考中" },
+			working: { text: "干活中" },
+			needs: { text: "需要你确认！" },
+		};
+		/** Session-scoped bridge: derives the pet state from the live session and publishes it. */
+		function PetBridge(props) {
+			const running = props.useSession((s) => s.running);
+			const pending = props.useSession((s) => s.pendingInteraction);
+			const callCount = props.useSession((s) => {
+				const rc = s.runningCalls;
+				if (rc === undefined || rc === null) return 0;
+				if (Array.isArray(rc)) return rc.length;
+				if (typeof rc.size === "number") return rc.size;
+				return Object.keys(rc).length;
+			});
+			useEffect(() => {
+				let kind = "idle";
+				let detail = "";
+				if (pending !== undefined && pending !== null) {
+					kind = "needs";
+					detail = pending === "approval" ? "有操作等待批准" : pending === "plan-review" ? "计划等待审阅" : "有问题等待回答";
+				} else if (running === true) {
+					if (callCount > 0) { kind = "working"; detail = "正在执行工具调用"; }
+					else { kind = "thinking"; detail = "模型正在思考"; }
+				}
+				petStore.set(kind, detail);
+			}, [running, pending, callCount]);
+			return null;
+		}
+		/** Root-scoped floating pet widget. */
+		function makePetWidget() {
+			return function PetWidget() {
+				const state = useSyncExternalStore(
+					(fn) => petStore.subscribe(fn),
+					() => petStore.get(),
+					() => petStore.get(),
+				);
+				const [pinned, setPinned] = useState(false);
+				const [hover, setHover] = useState(false);
+				const showBubble = pinned || hover || state.kind === "needs";
+				const copy = PET_COPY[state.kind] ?? PET_COPY.idle;
+				return h("div", {
+					className: "ccx-pet",
+					"data-state": state.kind,
+					onMouseEnter: () => setHover(true),
+					onMouseLeave: () => setHover(false),
+				},
+					showBubble ? h("div", { className: "ccx-pet-bubble" + (state.kind === "needs" ? " needs" : "") },
+						state.kind === "needs" ? "🔔 " + (state.detail || copy.text)
+							: state.kind === "thinking" ? h("span", { className: "ccx-pet-dots" }, copy.text, h("span", null, "·"), h("span", null, "·"), h("span", null, "·"))
+								: copy.text + (state.detail !== "" ? " · " + state.detail : ""),
+					) : null,
+					h("div", {
+						className: "ccx-pet-body",
+						title: "Codex 宠物 · 点击固定/收起状态气泡",
+						onClick: () => setPinned((v) => !v),
+					},
+						h("div", { className: "ccx-pet-anim" },
+							h("svg", { viewBox: "0 0 64 64", fill: "none", xmlns: "http://www.w3.org/2000/svg" },
+								h("path", { d: "M50 46c6-2 9-8 7-13", stroke: "currentColor", strokeWidth: "4", strokeLinecap: "round", opacity: ".7" }),
+								h("ellipse", { cx: "32", cy: "46", rx: "17", ry: "12", fill: "currentColor", opacity: ".85" }),
+								h("circle", { cx: "30", cy: "26", r: "13", fill: "currentColor" }),
+								h("path", { d: "M20 18l-3-9 9 4z", fill: "currentColor" }),
+								h("path", { d: "M40 18l3-9-9 4z", fill: "currentColor" }),
+								h("path", { d: "M20.5 16.5l-1.5-4.5 4.5 2z", fill: "var(--dsw-alias-bg-base)", opacity: ".6" }),
+								h("path", { d: "M39.5 16.5l1.5-4.5-4.5 2z", fill: "var(--dsw-alias-bg-base)", opacity: ".6" }),
+								state.kind === "idle"
+									? h(React.Fragment, null,
+										h("circle", { cx: "25", cy: "26", r: "2", fill: "var(--dsw-alias-bg-base)" }),
+										h("circle", { cx: "35", cy: "26", r: "2", fill: "var(--dsw-alias-bg-base)" }))
+									: state.kind === "needs"
+										? h(React.Fragment, null,
+											h("circle", { cx: "25", cy: "26", r: "3", fill: "var(--dsw-alias-bg-base)" }),
+											h("circle", { cx: "35", cy: "26", r: "3", fill: "var(--dsw-alias-bg-base)" }))
+										: h(React.Fragment, null,
+											h("path", { d: "M22 26h6", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", strokeLinecap: "round" }),
+											h("path", { d: "M32 26h6", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", strokeLinecap: "round" })),
+								h("path", { d: "M28 31q2 2 4 0", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "1.5", strokeLinecap: "round", fill: "none" }),
+								h("circle", { cx: "21", cy: "30", r: "2", fill: "var(--dsw-alias-state-error-primary)", opacity: ".35" }),
+								h("circle", { cx: "39", cy: "30", r: "2", fill: "var(--dsw-alias-state-error-primary)", opacity: ".35" }),
+							),
+						),
+					),
+				);
+			};
+		}
+		//#endregion

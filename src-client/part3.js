@@ -28,39 +28,42 @@
 			return { cells, max };
 		}
 		function DailyHeatmap({ daily }) {
-			const weeks = 26;
+			const weeks = 52;
 			const { cells, max } = useMemo(() => buildDailyCells(daily, weeks), [daily]);
-			const monthLabels = [];
+			const children = [];
+			// month labels (grid row 1)
 			let lastMonth = -1;
 			for (let w = 0; w < weeks; w += 1) {
 				const cell = cells[w * 7];
 				const month = new Date(cell.iso + "T00:00:00").getMonth();
 				if (month !== lastMonth) {
-					monthLabels.push(h("span", { key: w, style: { marginLeft: w === 0 ? 0 : 0 } }, (month + 1) + "月"));
+					children.push(h("span", { key: "m" + w, className: "ccx-heat-month", style: { gridColumn: w + 2, gridRow: 1 } }, (month + 1) + "月"));
 					lastMonth = month;
-				} else {
-					monthLabels.push(h("span", { key: w }));
 				}
 			}
-			const dayLabels = ["一", "", "三", "", "五", "", ""];
-			return h("div", { className: "ccx-heat-scroll" },
-				h("div", { className: "ccx-heat" },
-					h("div", { className: "ccx-heat-months" }, monthLabels),
-					dayLabels.map((label, r) =>
-						h("div", { key: r, className: "ccx-heat-row" },
-							h("span", { className: "ccx-heat-daylabel" }, label),
-							Array.from({ length: weeks }, (_, w) => {
-								const cell = cells[w * 7 + r];
-								const level = cell.tokens <= 0 || max <= 0 ? 0 : Math.ceil((cell.tokens / max) * 4);
-								return h("span", {
-									key: w,
-									className: "ccx-cell",
-									title: cell.iso + " · " + formatTokens(cell.tokens) + " tokens",
-									style: { background: cell.future ? "transparent" : levelColor(level), visibility: cell.future ? "hidden" : "visible" },
-								});
-							}))),
-				),
-			);
+			// weekday labels (grid column 1)
+			["一", "三", "五"].forEach((label, i) => {
+				children.push(h("span", { key: "d" + label, className: "ccx-heat-daylabel", style: { gridColumn: 1, gridRow: i * 2 + 2 } }, label));
+			});
+			// day cells
+			for (let w = 0; w < weeks; w += 1) {
+				for (let r = 0; r < 7; r += 1) {
+					const cell = cells[w * 7 + r];
+					const level = cell.tokens <= 0 || max <= 0 ? 0 : Math.ceil((cell.tokens / max) * 4);
+					children.push(h("span", {
+						key: cell.iso,
+						className: "ccx-cell",
+						title: cell.iso + " · " + formatTokens(cell.tokens) + " tokens",
+						style: {
+							gridColumn: w + 2,
+							gridRow: r + 2,
+							background: cell.future ? "transparent" : levelColor(level),
+							visibility: cell.future ? "hidden" : "visible",
+						},
+					}));
+				}
+			}
+			return h("div", { className: "ccx-heat" }, children);
 		}
 		function WeeklyBars({ daily }) {
 			const weeks = 26;
@@ -401,6 +404,27 @@
 				id: "codex-git-card",
 				order: -10,
 			}, GitCard)), "codex-clone: git card");
+
+			// Subagent roster card beside the git card.
+			const AgentCard = makeAgentCard(ctx);
+			ctx.effect(() => ctx.slots.inject("conversation.session.header.utilities", () => ctx.slots.register({
+				name: "conversation.session.header.utilities",
+				id: "codex-agent-card",
+				order: -5,
+			}, AgentCard)), "codex-clone: agent card");
+
+			// Pet: session-scoped state bridge + root-scoped floating widget.
+			ctx.effect(() => ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
+				name: "conversation.input.dock",
+				id: "codex-pet-bridge",
+				order: 30,
+			}, PetBridge)), "codex-clone: pet state bridge");
+			const PetWidget = makePetWidget();
+			ctx.effect(() => ctx.slots.inject("shell.overlay", () => ctx.slots.register({
+				name: "shell.overlay",
+				id: "codex-pet",
+				order: 50,
+			}, PetWidget)), "codex-clone: pet widget");
 
 			// '$' skills menu in the composer overlay.
 			const SkillDollarMenu = makeSkillDollarMenu(ctx);
