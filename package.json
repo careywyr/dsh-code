@@ -1,0 +1,31 @@
+{
+	"name": "dsh-codex-clone",
+	"version": "0.1.0",
+	"description": "Codex-style experience for DeepSeek Harness: Catppuccin theme switching, wallpaper background, home quick-prompt cards, git change-stats card, '$' skill trigger, and a Codex-style profile page with token stats and a contribution heatmap.",
+	"type": "module",
+	"main": "lib/index.js",
+	"exports": {
+		".": "./lib/index.js",
+		"./client": "./lib/client.js",
+		"./package.json": "./package.json"
+	},
+	"dsh": {
+		"client": {
+			"platform": "web",
+			"inject": [
+				"slots",
+				"theme",
+				"connection",
+				"timer"
+			]
+		}
+	},
+	"keywords": [
+		"dsh",
+		"deepseek-harness",
+		"cordis-plugin",
+		"catppuccin",
+		"codex"
+	],
+	"license": "MIT"
+}
