@@ -63,8 +63,17 @@ function lstatExists(p) {
 	}
 }
 
-// ── 1 + 2: symlinks ──────────────────────────────────────────────────────────
+// ── 0 + 1 + 2: symlinks ──────────────────────────────────────────────────────
 const installModules = findInstallNodeModules()
+// 0) Local dependency links: the package is imported via its realpath (this
+//    directory), so its own imports (@deepseek-ai/dsh-settings, schemastery)
+//    resolve from THIS node_modules. Gitignored; recreated on every install.
+for (const dep of ['dsh-settings', 'schemastery', 'cordis']) {
+	const link = path.join(PKG_DIR, 'node_modules', '@deepseek-ai', dep)
+	const target = path.join(installModules, '@deepseek-ai', dep)
+	ensureSymlink(link, target)
+}
+console.log('0) local dependency links ensured (node_modules/@deepseek-ai/*)')
 const profileLink = path.join(PROFILES_MODULES, PKG_NAME)
 const installLink = path.join(installModules, PKG_NAME)
 console.log(`1) profile node_modules link: ${ensureSymlink(profileLink, PKG_DIR)} (${profileLink})`)
