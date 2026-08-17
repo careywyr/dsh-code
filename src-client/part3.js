@@ -30,6 +30,8 @@
 		function DailyHeatmap({ daily }) {
 			const weeks = 52;
 			const { cells, max } = useMemo(() => buildDailyCells(daily, weeks), [daily]);
+			const [tooltip, setTooltip] = useState(null); // { x, y, iso, tokens }
+			const containerRef = useRef(null);
 			const children = [];
 			// month labels (grid row 1)
 			let lastMonth = -1;
@@ -53,17 +55,40 @@
 					children.push(h("span", {
 						key: cell.iso,
 						className: "ccx-cell",
-						title: cell.iso + " · " + formatTokens(cell.tokens) + " tokens",
 						style: {
 							gridColumn: w + 2,
 							gridRow: r + 2,
 							background: cell.future ? "transparent" : levelColor(level),
 							visibility: cell.future ? "hidden" : "visible",
 						},
+						onMouseEnter: (e) => {
+							if (cell.future) return;
+							const rect = e.currentTarget.getBoundingClientRect();
+							const containerRect = containerRef.current?.getBoundingClientRect();
+							if (containerRect) {
+								setTooltip({
+									x: rect.left - containerRect.left + rect.width / 2,
+									y: rect.top - containerRect.top,
+									iso: cell.iso,
+									tokens: cell.tokens,
+								});
+							}
+						},
+						onMouseLeave: () => setTooltip(null),
 					}));
 				}
 			}
-			return h("div", { className: "ccx-heat" }, children);
+			return h("div", { className: "ccx-heat ccx-tooltip-wrap", ref: containerRef },
+				children,
+				tooltip ? h("div", {
+					className: "ccx-tooltip visible",
+					style: { left: tooltip.x + "px", top: tooltip.y + "px", transform: "translate(-50%, -100%)" },
+				},
+					h("span", { className: "ccx-tooltip-date" }, tooltip.iso),
+					" · ",
+					h("span", { className: "ccx-tooltip-value" }, formatTokens(tooltip.tokens) + " tokens"),
+				) : null,
+			);
 		}
 		function WeeklyBars({ daily }) {
 			const weeks = 26;
@@ -86,13 +111,35 @@
 				return out;
 			}, [daily]);
 			const max = Math.max(1, ...data.map((d) => d.tokens));
-			return h("div", { className: "ccx-weekbars" },
+			const [tooltip, setTooltip] = useState(null); // { x, y, iso, tokens }
+			const containerRef = useRef(null);
+			return h("div", { className: "ccx-weekbars ccx-tooltip-wrap", ref: containerRef },
 				data.map((d) => h("div", {
 					key: d.iso,
 					className: "ccx-weekbar",
-					title: "周 " + d.iso + " · " + formatTokens(d.tokens) + " tokens",
 					style: { height: Math.max(3, (d.tokens / max) * 100) + "%", opacity: d.tokens > 0 ? 0.9 : 0.25 },
+					onMouseEnter: (e) => {
+						const rect = e.currentTarget.getBoundingClientRect();
+						const containerRect = containerRef.current?.getBoundingClientRect();
+						if (containerRect) {
+							setTooltip({
+								x: rect.left - containerRect.left + rect.width / 2,
+								y: rect.top - containerRect.top,
+								iso: d.iso,
+								tokens: d.tokens,
+							});
+						}
+					},
+					onMouseLeave: () => setTooltip(null),
 				})),
+				tooltip ? h("div", {
+					className: "ccx-tooltip visible",
+					style: { left: tooltip.x + "px", top: tooltip.y + "px", transform: "translate(-50%, -100%)" },
+				},
+					h("span", { className: "ccx-tooltip-date" }, "周 " + tooltip.iso),
+					" · ",
+					h("span", { className: "ccx-tooltip-value" }, formatTokens(tooltip.tokens) + " tokens"),
+				) : null,
 			);
 		}
 		function CumulativeChart({ daily }) {
@@ -239,6 +286,8 @@
 			username: "",
 			avatar: "",
 			quickPrompts: [],
+			petEnabled: true,
+			petSkin: "cat", // cat, dog, robot, ghost
 		};
 		/**
 		 * Client-side config store persisted in localStorage. The Web API only
@@ -397,21 +446,22 @@
 				order: -10,
 			}, HomeCards)), "codex-clone: home cards");
 
-			// Git change-stats card in the session header.
+			// Git change-stats card and Agent card - in input dock but visually positioned below tab bar.
 			const GitCard = makeGitCard(ctx);
-			ctx.effect(() => ctx.slots.inject("conversation.session.header.utilities", () => ctx.slots.register({
-				name: "conversation.session.header.utilities",
-				id: "codex-git-card",
-				order: -10,
-			}, GitCard)), "codex-clone: git card");
-
-			// Subagent roster card beside the git card.
 			const AgentCard = makeAgentCard(ctx);
-			ctx.effect(() => ctx.slots.inject("conversation.session.header.utilities", () => ctx.slots.register({
-				name: "conversation.session.header.utilities",
-				id: "codex-agent-card",
-				order: -5,
-			}, AgentCard)), "codex-clone: agent card");
+			// Wrapper component to display both cards in a horizontal row
+			function CardsRow(props) {
+				return h("div", { className: "ccx-cards-row" },
+					h(GitCard, props),
+					h(AgentCard, props),
+				);
+			}
+			// Register in conversation.input.dock (has session props) but use CSS to position visually
+			ctx.effect(() => ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
+				name: "conversation.input.dock",
+				id: "codex-cards-row",
+				order: -20,
+			}, CardsRow)), "codex-clone: cards row");
 
 			// Pet: session-scoped state bridge + root-scoped floating widget.
 			ctx.effect(() => ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
@@ -419,7 +469,13 @@
 				id: "codex-pet-bridge",
 				order: 30,
 			}, PetBridge)), "codex-clone: pet state bridge");
-			const PetWidget = makePetWidget();
+			// Download button mover: watches DOM and moves download button to bottom-right.
+			ctx.effect(() => ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
+				name: "conversation.input.dock",
+				id: "codex-download-mover",
+				order: 31,
+			}, DownloadButtonMover)), "codex-clone: download button mover");
+			const PetWidget = makePetWidget(ctx, useConfig);
 			ctx.effect(() => ctx.slots.inject("shell.overlay", () => ctx.slots.register({
 				name: "shell.overlay",
 				id: "codex-pet",

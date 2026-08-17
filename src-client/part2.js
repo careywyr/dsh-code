@@ -5,8 +5,59 @@
 				const sessionId = props.sessionId;
 				const cwd = props.useSession((s) => s.cwd);
 				const [stats, setStats] = useState(null);
-				const [open, setOpen] = useState(false);
+				const [open, setOpen] = useState(true); // Default expanded
+				const [isTrajectoryView, setIsTrajectoryView] = useState(false);
 				const rootRef = useRef(null);
+
+				// Detect if we're in trajectory view by checking the active tab
+				useEffect(() => {
+					const checkView = () => {
+						// Find all tab-like buttons and check if "轨迹" tab is active
+						const allButtons = document.querySelectorAll('button, [role="tab"], [data-tab]');
+						let trajectoryActive = false;
+						for (const btn of allButtons) {
+							const text = (btn.textContent || "").trim();
+							if (text === "轨迹") {
+								// Check if this tab is currently active/selected
+								const isActive = btn.classList.contains("active") ||
+									btn.classList.contains("on") ||
+									btn.getAttribute("aria-selected") === "true" ||
+									btn.getAttribute("data-active") === "true" ||
+									(btn.parentElement && btn.parentElement.querySelector(".active, .on") === btn);
+								if (isActive) {
+									trajectoryActive = true;
+									break;
+								}
+							}
+						}
+						// Also check: if "对话" tab exists and is NOT active, we're likely in trajectory
+						if (!trajectoryActive) {
+							for (const btn of allButtons) {
+								const text = (btn.textContent || "").trim();
+								if (text === "对话") {
+									const isActive = btn.classList.contains("active") ||
+										btn.classList.contains("on") ||
+										btn.getAttribute("aria-selected") === "true" ||
+										btn.getAttribute("data-active") === "true" ||
+										(btn.parentElement && btn.parentElement.querySelector(".active, .on") === btn);
+									if (!isActive) {
+										// Check if trajectory tab exists (meaning we switched away from chat)
+										const hasTrajectoryTab = Array.from(allButtons).some(b => (b.textContent || "").trim() === "轨迹");
+										if (hasTrajectoryTab) {
+											trajectoryActive = true;
+										}
+									}
+									break;
+								}
+							}
+						}
+						setIsTrajectoryView(trajectoryActive);
+					};
+					checkView();
+					const interval = setInterval(checkView, 300);
+					return () => clearInterval(interval);
+				}, []);
+
 				useEffect(() => {
 					let alive = true;
 					const load = async () => {
@@ -29,27 +80,44 @@
 					document.addEventListener("mousedown", onDown, true);
 					return () => document.removeEventListener("mousedown", onDown, true);
 				}, [open]);
+				// Hide in trajectory view
+				if (isTrajectoryView) return null;
 				if (stats === null || stats.isRepo !== true) return null;
 				const dirty = stats.added > 0 || stats.deleted > 0 || stats.changed > 0 || stats.untracked > 0;
-				return h("div", { className: "ccx-git", ref: rootRef },
-					h("button", {
-						type: "button",
-						className: "ccx-git-pill",
-						title: dirty ? "点击查看变更文件" : "工作区干净",
-						onClick: () => setOpen((v) => !v),
-					},
-						h("span", { className: "ccx-git-dot" + (dirty ? "" : " clean") }),
-						h("span", { className: "ccx-git-branch" }, stats.branch || "HEAD"),
-						dirty
-							? h(React.Fragment, null,
-								h("span", { className: "ccx-git-add" }, "+" + stats.added),
-								h("span", { className: "ccx-git-del" }, "−" + stats.deleted),
-								h("span", { className: "ccx-git-files" }, (stats.changed + stats.untracked) + " 文件"))
-							: h("span", { className: "ccx-git-files" }, "已同步"),
+				const totalFiles = stats.changed + stats.untracked;
+				return h("div", { className: "ccx-git-block", ref: rootRef },
+					h("div", { className: "ccx-git-block-header" },
+						h("span", { className: "ccx-git-block-title" },
+							h("span", { className: "ccx-git-dot" + (dirty ? "" : " clean") }),
+							"变更"
+						),
+						h("button", {
+							type: "button",
+							className: "ccx-git-block-toggle",
+							title: open ? "收起" : "展开文件列表",
+							onClick: () => setOpen((v) => !v),
+						}, open ? "▲" : "▼"),
 					),
-					open ? h("div", { className: "ccx-git-pop" },
+					h("div", { className: "ccx-git-block-stats" },
+						stats.branch ? h("span", { className: "ccx-git-block-stat" },
+							h("span", null, "⎇"),
+							h("span", { style: { color: "var(--dsw-alias-label-primary)", fontWeight: 500 } }, stats.branch)
+						) : null,
+						dirty ? h(React.Fragment, null,
+							h("span", { className: "ccx-git-block-stat" },
+								h("span", { className: "ccx-git-add" }, "+" + stats.added),
+							),
+							h("span", { className: "ccx-git-block-stat" },
+								h("span", { className: "ccx-git-del" }, "−" + stats.deleted),
+							),
+							h("span", { className: "ccx-git-block-stat" },
+								h("span", { className: "ccx-git-files-count" }, totalFiles + " 文件"),
+							),
+						) : h("span", { className: "ccx-git-files-count" }, "已同步"),
+					),
+					open ? h("div", { className: "ccx-git-pop", style: { position: "relative", top: 0, right: 0, marginTop: "8px" } },
 						h("div", { className: "ccx-git-pop-title" },
-							"工作区变更 · " + (stats.changed + stats.untracked) + " 个文件 · +" + stats.added + " −" + stats.deleted + (stats.untracked > 0 ? " · " + stats.untracked + " 未跟踪" : "")),
+							"工作区变更 · " + totalFiles + " 个文件 · +" + stats.added + " −" + stats.deleted + (stats.untracked > 0 ? " · " + stats.untracked + " 未跟踪" : "")),
 						stats.files.length === 0 && stats.untracked === 0
 							? h("div", { className: "ccx-git-empty" }, "没有已跟踪的变更。")
 							: stats.files.map((f) => h("div", { key: f.file, className: "ccx-git-file", title: f.file },
@@ -75,23 +143,67 @@
 		function makeHomeCards(ctx, config, useConfig) {
 			return function HomeCards(props) {
 				const blank = props.useSession((s) => s.blank);
-				const cwd = props.useSession((s) => s.cwd);
+				const sessionId = props.sessionId;
+				const cwd = props.useSession((s) => s.cwd) || "";
 				const cfg = useConfig();
+				const [branch, setBranch] = useState("");
+				const [dirName, setDirName] = useState("");
 				// Initialize quickPrompts with defaults if empty (ensures deletability)
 				useEffect(() => {
 					if (!Array.isArray(cfg.quickPrompts) || cfg.quickPrompts.length === 0) {
 						config.set("quickPrompts", [...DEFAULT_PROMPTS]);
 					}
 				}, []); // Run only once on mount
+				// Fetch git branch info using sessionId (same as GitCard)
+				useEffect(() => {
+					let alive = true;
+					const fetchGitInfo = async () => {
+						try {
+							// Use sessionId to let server resolve cwd, same as GitCard
+							const res = await fetch("/__codex/git?session=" + encodeURIComponent(sessionId || ""));
+							if (!res.ok) {
+								setBranch("");
+								setDirName("");
+								return;
+							}
+							const data = await res.json();
+							if (alive) {
+								if (data.isRepo && data.branch) {
+									setBranch(data.branch);
+								} else {
+									setBranch("");
+								}
+								// Extract dir name from cwd if available
+								if (cwd) {
+									setDirName(cwd.split("/").filter(Boolean).pop() || "");
+								} else {
+									setDirName("");
+								}
+							}
+						} catch {
+							if (alive) {
+								setBranch("");
+								setDirName("");
+							}
+						}
+					};
+					fetchGitInfo();
+					// Also poll every 5 seconds in case branch changes
+					const interval = setInterval(fetchGitInfo, 5000);
+					return () => { alive = false; clearInterval(interval); };
+				}, [sessionId, cwd]);
 				if (blank !== true) return null;
 				const now = new Date();
 				const name = typeof cfg.username === "string" && cfg.username !== "" ? cfg.username : "";
-				const cards = Array.isArray(cfg.quickPrompts) && cfg.quickPrompts.length > 0 ? cfg.quickPrompts : [];
-				const dirName = typeof cwd === "string" && cwd !== "" ? cwd.split("/").filter(Boolean).pop() : "";
+				const cards = Array.isArray(cfg.quickPrompts) && cfg.quickPrompts.length > 0 ? cfg.quickPrompts : DEFAULT_PROMPTS;
 				return h("div", { className: "ccx-homecards" },
+					// Branch indicator - positioned to align with workspace/mode row above
+					branch !== "" ? h("div", { className: "ccx-branch-indicator" },
+						h("span", { className: "ccx-branch-icon" }, "⎇"),
+						h("span", { className: "ccx-branch-name" }, branch),
+					) : null,
 					h("div", { className: "ccx-greet" },
 						h("div", { className: "ccx-greet-title" }, greetingOfHour(now.getHours()) + (name !== "" ? "，" + name : "") + " 👋"),
-						dirName !== "" ? h("div", { className: "ccx-greet-sub" }, "📁 " + dirName) : null,
 					),
 					h("div", { className: "ccx-tiles" }, cards.map((card, index) =>
 						h("button", {
@@ -379,9 +491,44 @@
 						),
 						h(QuickPromptAdder, { onAdd: (item) => config.set("quickPrompts", [...(Array.isArray(cfg.quickPrompts) ? cfg.quickPrompts : []), item]) }),
 					),
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "状态宠物"),
+						h("div", { className: "ccx-group-hint" }, "右下角浮动宠物，随会话状态切换动画；可拖拽移动、点击固定气泡。"),
+						h("div", { className: "ccx-row" },
+							h("label", { style: { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" } },
+								h("input", {
+									type: "checkbox",
+									checked: cfg.petEnabled !== false,
+									onChange: (e) => config.set("petEnabled", e.target.checked),
+									style: { width: "16px", height: "16px", accentColor: "var(--dsw-alias-state-business-primary)" },
+								}),
+								h("span", null, "启用宠物"),
+							),
+						),
+						cfg.petEnabled !== false ? h("div", { style: { marginTop: "8px" } },
+							h("div", { style: { fontSize: "12px", color: "var(--dsw-alias-label-caption)", marginBottom: "8px" } }, "选择宠物外观："),
+							h("div", { className: "ccx-cubes" }, PET_SKINS.map((skin) =>
+								h("button", {
+									key: skin.id,
+									type: "button",
+									className: "ccx-cube" + ((cfg.petSkin ?? "cat") === skin.id ? " selected" : ""),
+									onClick: () => config.set("petSkin", skin.id),
+									style: { minWidth: "80px" },
+								},
+									h("span", { style: { fontSize: "24px" } }, skin.icon),
+									h("span", null, skin.label)),
+							)),
+						) : null,
+					),
 				);
 			};
 		}
+		const PET_SKINS = [
+			{ id: "cat", label: "猫咪", icon: "🐱" },
+			{ id: "dog", label: "狗狗", icon: "🐶" },
+			{ id: "robot", label: "机器人", icon: "🤖" },
+			{ id: "ghost", label: "幽灵", icon: "👻" },
+		];
 		function QuickPromptAdder({ onAdd }) {
 			const [title, setTitle] = useState("");
 			const [prompt, setPrompt] = useState("");
@@ -406,7 +553,54 @@
 				const sessionId = props.sessionId;
 				const catalog = props.useSessions((s) => (sessionId === undefined ? undefined : s.subagentsByParent?.[sessionId]));
 				const [open, setOpen] = useState(false);
+				const [isTrajectoryView, setIsTrajectoryView] = useState(false);
 				const rootRef = useRef(null);
+
+				// Detect if we're in trajectory view by checking the active tab
+				useEffect(() => {
+					const checkView = () => {
+						const allButtons = document.querySelectorAll('button, [role="tab"], [data-tab]');
+						let trajectoryActive = false;
+						for (const btn of allButtons) {
+							const text = (btn.textContent || "").trim();
+							if (text === "轨迹") {
+								const isActive = btn.classList.contains("active") ||
+									btn.classList.contains("on") ||
+									btn.getAttribute("aria-selected") === "true" ||
+									btn.getAttribute("data-active") === "true" ||
+									(btn.parentElement && btn.parentElement.querySelector(".active, .on") === btn);
+								if (isActive) {
+									trajectoryActive = true;
+									break;
+								}
+							}
+						}
+						if (!trajectoryActive) {
+							for (const btn of allButtons) {
+								const text = (btn.textContent || "").trim();
+								if (text === "对话") {
+									const isActive = btn.classList.contains("active") ||
+										btn.classList.contains("on") ||
+										btn.getAttribute("aria-selected") === "true" ||
+										btn.getAttribute("data-active") === "true" ||
+										(btn.parentElement && btn.parentElement.querySelector(".active, .on") === btn);
+									if (!isActive) {
+										const hasTrajectoryTab = Array.from(allButtons).some(b => (b.textContent || "").trim() === "轨迹");
+										if (hasTrajectoryTab) {
+											trajectoryActive = true;
+										}
+									}
+									break;
+								}
+							}
+						}
+						setIsTrajectoryView(trajectoryActive);
+					};
+					checkView();
+					const interval = setInterval(checkView, 300);
+					return () => clearInterval(interval);
+				}, []);
+
 				useEffect(() => {
 					if (!open) return;
 					const onDown = (event) => {
@@ -415,6 +609,8 @@
 					document.addEventListener("mousedown", onDown, true);
 					return () => document.removeEventListener("mousedown", onDown, true);
 				}, [open]);
+				// Hide in trajectory view
+				if (isTrajectoryView) return null;
 				const entries = (catalog?.entries ?? []).filter((e) => e.kind === "child");
 				if (entries.length === 0) return null;
 				const runningCount = entries.filter((e) => e.activity === "running").length;
@@ -499,9 +695,61 @@
 			}, [running, pending, callCount]);
 			return null;
 		}
-		/** Root-scoped floating pet widget. */
-		function makePetWidget() {
+		/** Session-scoped component that moves the download button to bottom-right using MutationObserver. */
+		function DownloadButtonMover() {
+			useEffect(() => {
+				if (typeof document === "undefined") return;
+				const movedButtons = new WeakSet();
+				const moveDownloadButton = () => {
+					// Find all potential download buttons in session header utilities
+					const utilities = document.querySelectorAll("[data-slot='conversation.session.header.utilities'], .conversation-session-header-utilities");
+					utilities.forEach((container) => {
+						const children = Array.from(container.children);
+						children.forEach((child) => {
+							// Skip already moved or our own components
+							if (movedButtons.has(child)) return;
+							if (child.classList.contains("ccx-git-block") || child.classList.contains("ccx-agents")) return;
+							// Check if this looks like a download button
+							const isButton = child.tagName === "BUTTON" || child.querySelector("button") !== null;
+							const text = child.textContent || "";
+							const hasDownloadHint = /download|下载|log|日志/i.test(text);
+							const hasSvg = child.querySelector("svg") !== null;
+							// Move the last non-our button or one with download hints
+							if (isButton && (hasDownloadHint || (hasSvg && children.indexOf(child) === children.length - 1))) {
+								child.style.position = "fixed";
+								child.style.right = "20px";
+								child.style.bottom = "20px";
+								child.style.zIndex = "85";
+								child.style.margin = "0";
+								movedButtons.add(child);
+							}
+						});
+					});
+				};
+				// Use MutationObserver to watch for DOM changes
+				const observer = new MutationObserver(() => {
+					moveDownloadButton();
+				});
+				observer.observe(document.body, { childList: true, subtree: true });
+				// Also run immediately and after delays
+				moveDownloadButton();
+				const timers = [
+					setTimeout(moveDownloadButton, 100),
+					setTimeout(moveDownloadButton, 500),
+					setTimeout(moveDownloadButton, 1000),
+				];
+				return () => {
+					observer.disconnect();
+					timers.forEach(clearTimeout);
+				};
+			}, []);
+			return null;
+		}
+		/** Root-scoped floating pet widget with drag support, multiple skins, and config. */
+		const PET_POS_KEY = "dsh-codex-clone:pet-position:v1";
+		function makePetWidget(ctx, useConfig) {
 			return function PetWidget() {
+				const cfg = useConfig();
 				const state = useSyncExternalStore(
 					(fn) => petStore.subscribe(fn),
 					() => petStore.get(),
@@ -509,11 +757,80 @@
 				);
 				const [pinned, setPinned] = useState(false);
 				const [hover, setHover] = useState(false);
+				const [pos, setPos] = useState(() => {
+					try {
+						const saved = localStorage.getItem(PET_POS_KEY);
+						if (saved) return JSON.parse(saved);
+					} catch { /* ignore */ }
+					return { x: window.innerWidth - 84, y: window.innerHeight - 84 };
+				});
+				const [dragging, setDragging] = useState(false);
+				const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false });
+				const petRef = useRef(null);
+
 				const showBubble = pinned || hover || state.kind === "needs";
 				const copy = PET_COPY[state.kind] ?? PET_COPY.idle;
+				const skin = cfg.petSkin ?? "cat";
+				const enabled = cfg.petEnabled !== false;
+
+				// Save position to localStorage when it changes
+				useEffect(() => {
+					try {
+						localStorage.setItem(PET_POS_KEY, JSON.stringify(pos));
+					} catch { /* quota */ }
+				}, [pos]);
+
+				// Drag handlers - attached to pet body only
+				const onBodyMouseDown = (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					setDragging(true);
+					dragRef.current = {
+						startX: e.clientX,
+						startY: e.clientY,
+						startPosX: pos.x,
+						startPosY: pos.y,
+						moved: false,
+					};
+				};
+
+				useEffect(() => {
+					if (!dragging) return;
+					const onMouseMove = (e) => {
+						const dx = e.clientX - dragRef.current.startX;
+						const dy = e.clientY - dragRef.current.startY;
+						if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+							dragRef.current.moved = true;
+						}
+						const newX = Math.max(0, Math.min(window.innerWidth - 64, dragRef.current.startPosX + dx));
+						const newY = Math.max(0, Math.min(window.innerHeight - 64, dragRef.current.startPosY + dy));
+						setPos({ x: newX, y: newY });
+					};
+					const onMouseUp = () => {
+						setDragging(false);
+					};
+					document.addEventListener("mousemove", onMouseMove);
+					document.addEventListener("mouseup", onMouseUp);
+					return () => {
+						document.removeEventListener("mousemove", onMouseMove);
+						document.removeEventListener("mouseup", onMouseUp);
+					};
+				}, [dragging]);
+
+				// Don't render if disabled
+				if (!enabled) return null;
+
 				return h("div", {
-					className: "ccx-pet",
+					ref: petRef,
+					className: "ccx-pet" + (dragging ? " dragging" : ""),
 					"data-state": state.kind,
+					"data-skin": skin,
+					style: {
+						left: pos.x + "px",
+						top: pos.y + "px",
+						right: "auto",
+						bottom: "auto",
+					},
 					onMouseEnter: () => setHover(true),
 					onMouseLeave: () => setHover(false),
 				},
@@ -524,36 +841,136 @@
 					) : null,
 					h("div", {
 						className: "ccx-pet-body",
-						title: "Codex 宠物 · 点击固定/收起状态气泡",
-						onClick: () => setPinned((v) => !v),
+						title: "Codex 宠物 · 拖拽移动 · 点击固定/收起状态气泡",
+						onMouseDown: onBodyMouseDown,
+						onClick: (e) => {
+							if (!dragRef.current.moved) setPinned((v) => !v);
+						},
 					},
 						h("div", { className: "ccx-pet-anim" },
-							h("svg", { viewBox: "0 0 64 64", fill: "none", xmlns: "http://www.w3.org/2000/svg" },
-								h("path", { d: "M50 46c6-2 9-8 7-13", stroke: "currentColor", strokeWidth: "4", strokeLinecap: "round", opacity: ".7" }),
-								h("ellipse", { cx: "32", cy: "46", rx: "17", ry: "12", fill: "currentColor", opacity: ".85" }),
-								h("circle", { cx: "30", cy: "26", r: "13", fill: "currentColor" }),
-								h("path", { d: "M20 18l-3-9 9 4z", fill: "currentColor" }),
-								h("path", { d: "M40 18l3-9-9 4z", fill: "currentColor" }),
-								h("path", { d: "M20.5 16.5l-1.5-4.5 4.5 2z", fill: "var(--dsw-alias-bg-base)", opacity: ".6" }),
-								h("path", { d: "M39.5 16.5l1.5-4.5-4.5 2z", fill: "var(--dsw-alias-bg-base)", opacity: ".6" }),
-								state.kind === "idle"
-									? h(React.Fragment, null,
-										h("circle", { cx: "25", cy: "26", r: "2", fill: "var(--dsw-alias-bg-base)" }),
-										h("circle", { cx: "35", cy: "26", r: "2", fill: "var(--dsw-alias-bg-base)" }))
-									: state.kind === "needs"
-										? h(React.Fragment, null,
-											h("circle", { cx: "25", cy: "26", r: "3", fill: "var(--dsw-alias-bg-base)" }),
-											h("circle", { cx: "35", cy: "26", r: "3", fill: "var(--dsw-alias-bg-base)" }))
-										: h(React.Fragment, null,
-											h("path", { d: "M22 26h6", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", strokeLinecap: "round" }),
-											h("path", { d: "M32 26h6", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", strokeLinecap: "round" })),
-								h("path", { d: "M28 31q2 2 4 0", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "1.5", strokeLinecap: "round", fill: "none" }),
-								h("circle", { cx: "21", cy: "30", r: "2", fill: "var(--dsw-alias-state-error-primary)", opacity: ".35" }),
-								h("circle", { cx: "39", cy: "30", r: "2", fill: "var(--dsw-alias-state-error-primary)", opacity: ".35" }),
-							),
+							renderPetSvg(skin, state.kind),
 						),
 					),
 				);
 			};
+		}
+
+		/** Render pet SVG based on skin and state. */
+		function renderPetSvg(skin, stateKind) {
+			const eyeOpen = stateKind === "idle" || stateKind === "needs";
+			const eyeSize = stateKind === "needs" ? 3 : 2;
+			const mouthPath = stateKind === "working" ? "M26 31q4 3 8 0" : stateKind === "needs" ? "M27 32q3-2 6 0" : "M28 31q2 2 4 0";
+
+			if (skin === "dog") {
+				return h("svg", { viewBox: "0 0 64 64", fill: "none", xmlns: "http://www.w3.org/2000/svg" },
+					h("path", { d: "M48 48c5-1 8-6 6-11", stroke: "currentColor", strokeWidth: "4", strokeLinecap: "round", opacity: ".7" }),
+					h("ellipse", { cx: "32", cy: "48", rx: "16", ry: "11", fill: "currentColor", opacity: ".85" }),
+					h("circle", { cx: "32", cy: "28", r: "14", fill: "currentColor" }),
+					// Floppy ears
+					h("path", { d: "M18 22c-4-2-6-8-4-12 2-2 6 0 8 4z", fill: "currentColor" }),
+					h("path", { d: "M46 22c4-2 6-8 4-12-2-2-6 0-8 4z", fill: "currentColor" }),
+					// Snout
+					h("ellipse", { cx: "32", cy: "34", rx: "6", ry: "4", fill: "var(--dsw-alias-bg-base)", opacity: ".3" }),
+					h("circle", { cx: "32", cy: "32", r: "2.5", fill: "var(--dsw-alias-bg-base)" }),
+					// Eyes
+					eyeOpen
+						? h(React.Fragment, null,
+							h("circle", { cx: "26", cy: "26", r: String(eyeSize), fill: "var(--dsw-alias-bg-base)" }),
+							h("circle", { cx: "38", cy: "26", r: String(eyeSize), fill: "var(--dsw-alias-bg-base)" }))
+						: h(React.Fragment, null,
+							h("path", { d: "M23 26h6", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", strokeLinecap: "round" }),
+							h("path", { d: "M35 26h6", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", strokeLinecap: "round" })),
+					// Mouth
+					h("path", { d: mouthPath, stroke: "var(--dsw-alias-bg-base)", strokeWidth: "1.5", strokeLinecap: "round", fill: "none" }),
+					// Tongue when working
+					stateKind === "working" ? h("path", { d: "M30 34q2 4 4 0", fill: "var(--dsw-alias-state-error-primary)", opacity: ".6" }) : null,
+				);
+			}
+
+			if (skin === "robot") {
+				return h("svg", { viewBox: "0 0 64 64", fill: "none", xmlns: "http://www.w3.org/2000/svg" },
+					// Antenna
+					h("line", { x1: "32", y1: "8", x2: "32", y2: "14", stroke: "currentColor", strokeWidth: "2" }),
+					h("circle", { cx: "32", cy: "6", r: "3", fill: stateKind === "working" ? "var(--dsw-alias-state-success-primary)" : "currentColor" }),
+					// Body
+					h("rect", { x: "18", y: "38", width: "28", height: "18", rx: "4", fill: "currentColor", opacity: ".85" }),
+					// Head
+					h("rect", { x: "16", y: "14", width: "32", height: "26", rx: "6", fill: "currentColor" }),
+					// Screen face
+					h("rect", { x: "20", y: "18", width: "24", height: "16", rx: "3", fill: "var(--dsw-alias-bg-base)", opacity: ".2" }),
+					// Eyes - LED style
+					eyeOpen
+						? h(React.Fragment, null,
+							h("rect", { x: "24", y: "23", width: "4", height: "4", rx: "1", fill: "var(--dsw-alias-state-business-primary)" }),
+							h("rect", { x: "36", y: "23", width: "4", height: "4", rx: "1", fill: "var(--dsw-alias-state-business-primary)" }))
+						: h(React.Fragment, null,
+							h("line", { x1: "24", y1: "25", x2: "28", y2: "25", stroke: "var(--dsw-alias-state-business-primary)", strokeWidth: "2" }),
+							h("line", { x1: "36", y1: "25", x2: "40", y2: "25", stroke: "var(--dsw-alias-state-business-primary)", strokeWidth: "2" })),
+					// Mouth - digital display
+					h("rect", { x: "28", y: "30", width: "8", height: "2", rx: "1", fill: "var(--dsw-alias-state-business-primary)", opacity: ".6" }),
+					// Arms
+					h("rect", { x: "12", y: "40", width: "4", height: "12", rx: "2", fill: "currentColor", opacity: ".7" }),
+					h("rect", { x: "48", y: "40", width: "4", height: "12", rx: "2", fill: "currentColor", opacity: ".7" }),
+					// Working animation - blinking lights
+					stateKind === "working" ? h(React.Fragment, null,
+						h("circle", { cx: "22", cy: "44", r: "2", fill: "var(--dsw-alias-state-success-primary)", opacity: ".8" }),
+						h("circle", { cx: "42", cy: "44", r: "2", fill: "var(--dsw-alias-state-warn-primary)", opacity: ".8" }),
+					) : null,
+				);
+			}
+
+			if (skin === "ghost") {
+				return h("svg", { viewBox: "0 0 64 64", fill: "none", xmlns: "http://www.w3.org/2000/svg" },
+					// Ghost body with wavy bottom
+					h("path", {
+						d: "M32 12c-10 0-16 8-16 18v16c0 2 2 4 4 2s4-2 6 0 4 2 6 0 4-2 6 0 4 2 6 0 4-2 4-2V30c0-10-6-18-16-18z",
+						fill: "currentColor",
+						opacity: ".9",
+					}),
+					// Eyes - big and round
+					eyeOpen
+						? h(React.Fragment, null,
+							h("circle", { cx: "26", cy: "28", r: "4", fill: "var(--dsw-alias-bg-base)" }),
+							h("circle", { cx: "38", cy: "28", r: "4", fill: "var(--dsw-alias-bg-base)" }),
+							h("circle", { cx: "27", cy: "27", r: "1.5", fill: "currentColor" }),
+							h("circle", { cx: "39", cy: "27", r: "1.5", fill: "currentColor" }))
+						: h(React.Fragment, null,
+							h("path", { d: "M22 28q4-2 8 0", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", fill: "none" }),
+							h("path", { d: "M34 28q4-2 8 0", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", fill: "none" })),
+					// Mouth - O shape when needs attention
+					stateKind === "needs"
+						? h("circle", { cx: "32", cy: "36", r: "3", fill: "var(--dsw-alias-bg-base)" })
+						: h("path", { d: "M28 36q4 3 8 0", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "1.5", fill: "none" }),
+					// Blush
+					h("circle", { cx: "22", cy: "32", r: "2", fill: "var(--dsw-alias-state-error-primary)", opacity: ".3" }),
+					h("circle", { cx: "42", cy: "32", r: "2", fill: "var(--dsw-alias-state-error-primary)", opacity: ".3" }),
+				);
+			}
+
+			// Default: cat
+			return h("svg", { viewBox: "0 0 64 64", fill: "none", xmlns: "http://www.w3.org/2000/svg" },
+				h("path", { d: "M50 46c6-2 9-8 7-13", stroke: "currentColor", strokeWidth: "4", strokeLinecap: "round", opacity: ".7" }),
+				h("ellipse", { cx: "32", cy: "46", rx: "17", ry: "12", fill: "currentColor", opacity: ".85" }),
+				h("circle", { cx: "30", cy: "26", r: "13", fill: "currentColor" }),
+				h("path", { d: "M20 18l-3-9 9 4z", fill: "currentColor" }),
+				h("path", { d: "M40 18l3-9-9 4z", fill: "currentColor" }),
+				h("path", { d: "M20.5 16.5l-1.5-4.5 4.5 2z", fill: "var(--dsw-alias-bg-base)", opacity: ".6" }),
+				h("path", { d: "M39.5 16.5l1.5-4.5-4.5 2z", fill: "var(--dsw-alias-bg-base)", opacity: ".6" }),
+				eyeOpen
+					? h(React.Fragment, null,
+						h("circle", { cx: "25", cy: "26", r: String(eyeSize), fill: "var(--dsw-alias-bg-base)" }),
+						h("circle", { cx: "35", cy: "26", r: String(eyeSize), fill: "var(--dsw-alias-bg-base)" }))
+					: h(React.Fragment, null,
+						h("path", { d: "M22 26h6", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", strokeLinecap: "round" }),
+						h("path", { d: "M32 26h6", stroke: "var(--dsw-alias-bg-base)", strokeWidth: "2", strokeLinecap: "round" })),
+				h("path", { d: mouthPath, stroke: "var(--dsw-alias-bg-base)", strokeWidth: "1.5", strokeLinecap: "round", fill: "none" }),
+				h("circle", { cx: "21", cy: "30", r: "2", fill: "var(--dsw-alias-state-error-primary)", opacity: ".35" }),
+				h("circle", { cx: "39", cy: "30", r: "2", fill: "var(--dsw-alias-state-error-primary)", opacity: ".35" }),
+				// Whiskers
+				h("line", { x1: "14", y1: "28", x2: "20", y2: "29", stroke: "currentColor", strokeWidth: "1", opacity: ".5" }),
+				h("line", { x1: "14", y1: "32", x2: "20", y2: "31", stroke: "currentColor", strokeWidth: "1", opacity: ".5" }),
+				h("line", { x1: "50", y1: "28", x2: "44", y2: "29", stroke: "currentColor", strokeWidth: "1", opacity: ".5" }),
+				h("line", { x1: "50", y1: "32", x2: "44", y2: "31", stroke: "currentColor", strokeWidth: "1", opacity: ".5" }),
+			);
 		}
 		//#endregion

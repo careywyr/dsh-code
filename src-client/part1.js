@@ -21,24 +21,34 @@ html.ccx-wallpaper, html.ccx-wallpaper body {
 	background-color: transparent !important;
 }
 /* ── home cards (input dock) ── */
-.ccx-homecards { display:flex; flex-direction:column; gap:10px; width:100%; max-width:var(--dsh-composer-card-max-width); margin:0 auto; padding:0 4px; }
+.ccx-homecards { display:flex; flex-direction:column; gap:10px; width:100%; max-width:var(--dsh-composer-card-max-width); margin:0 auto; padding:0 4px; position:relative; }
+/* Branch indicator - positioned to align with workspace/mode selector row above the composer */
+.ccx-branch-indicator { position:absolute; top:-36px; right:0; display:flex; align-items:center; gap:4px; padding:4px 10px; border-radius:8px; background:var(--dsw-alias-bg-layer-1); border:1px solid var(--dsw-alias-border-l2); font-size:12px; font-family:var(--ds-font-family-code); color:var(--dsw-alias-label-secondary); }
+.ccx-branch-icon { color:var(--dsw-alias-label-caption); }
+.ccx-branch-name { color:var(--dsw-alias-label-primary); font-weight:500; }
 .ccx-greet { display:flex; flex-direction:column; gap:2px; padding:0 6px 2px; }
 .ccx-greet-title { font-size:20px; font-weight:600; color:var(--dsw-alias-label-primary); line-height:28px; }
-.ccx-greet-sub { font-size:12px; color:var(--dsw-alias-label-caption); line-height:18px; font-family:var(--ds-font-family-code); }
 .ccx-tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:8px; }
 .ccx-tile { display:flex; flex-direction:column; gap:4px; text-align:left; padding:10px 12px; border-radius:14px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 82%, transparent); color:var(--dsw-alias-label-primary); cursor:pointer; font:inherit; transition:border-color .12s, background-color .12s, transform .12s; backdrop-filter:blur(6px); }
 .ccx-tile:hover { border-color:var(--dsw-alias-state-business-primary); background:var(--dsw-alias-interactive-bg-hover); transform:translateY(-1px); }
 .ccx-tile-head { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:500; line-height:20px; }
 .ccx-tile-icon { font-size:15px; }
 .ccx-tile-prompt { font-size:11px; color:var(--dsw-alias-label-caption); line-height:16px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-/* ── git change card (session header utilities) ── */
-.ccx-git { position:relative; display:flex; align-items:center; }
-.ccx-git-pill { display:flex; align-items:center; gap:7px; height:28px; padding:0 10px; border-radius:9px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-secondary); font-size:12px; font-family:var(--ds-font-family-code); cursor:pointer; transition:border-color .12s; white-space:nowrap; }
-.ccx-git-pill:hover { border-color:var(--dsw-alias-border-l4); }
-.ccx-git-branch { color:var(--dsw-alias-label-primary); font-weight:500; max-width:140px; overflow:hidden; text-overflow:ellipsis; }
+/* ── git change card — visually positioned below tab bar via fixed positioning ── */
+.ccx-git-block { position:relative; display:flex; flex-direction:column; gap:6px; padding:8px 10px; border-radius:10px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 92%, transparent); backdrop-filter:blur(8px); font-size:11px; }
+/* Cards row: use fixed positioning to place below tab bar, top-right of conversation area */
+.ccx-cards-row { position:fixed; top:80px; right:24px; z-index:50; display:flex; gap:6px; pointer-events:auto; }
+/* Hide the input dock slot's default spacing when cards are fixed */
+.ccx-cards-row:empty { display:none; }
+.ccx-git-block-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.ccx-git-block-title { font-size:13px; font-weight:500; color:var(--dsw-alias-label-primary); display:flex; align-items:center; gap:6px; }
+.ccx-git-block-toggle { width:20px; height:20px; border:none; border-radius:6px; background:transparent; color:var(--dsw-alias-label-caption); cursor:pointer; display:grid; place-items:center; font-size:12px; transition:background-color .12s; }
+.ccx-git-block-toggle:hover { background:var(--dsw-alias-interactive-bg-hover); }
+.ccx-git-block-stats { display:flex; align-items:center; gap:12px; font-size:12px; font-family:var(--ds-font-family-code); }
+.ccx-git-block-stat { display:flex; align-items:center; gap:4px; }
 .ccx-git-add { color:var(--dsw-alias-state-success-primary); font-weight:600; }
 .ccx-git-del { color:var(--dsw-alias-state-error-primary); font-weight:600; }
-.ccx-git-files { color:var(--dsw-alias-label-caption); }
+.ccx-git-files-count { color:var(--dsw-alias-label-caption); }
 .ccx-git-dot { width:7px; height:7px; border-radius:50%; background:var(--dsw-alias-state-warn-primary); flex:none; }
 .ccx-git-dot.clean { background:var(--dsw-alias-state-success-primary); }
 .ccx-git-pop { position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:300px; max-width:440px; max-height:340px; overflow:auto; border-radius:12px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); box-shadow:var(--dsw-shadow-lv2, 0 8px 24px rgba(0,0,0,.18)); padding:8px; }
@@ -105,11 +115,19 @@ html.ccx-wallpaper, html.ccx-wallpaper body {
 .ccx-heat { display:grid; grid-template-columns:22px repeat(52, minmax(4px, 1fr)); gap:3px; width:100%; }
 .ccx-heat-month { font-size:10px; color:var(--dsw-alias-label-caption); height:14px; line-height:14px; overflow:visible; white-space:nowrap; }
 .ccx-heat-daylabel { font-size:9px; color:var(--dsw-alias-label-caption); text-align:right; padding-right:2px; align-self:center; }
-.ccx-cell { aspect-ratio:1; width:100%; min-width:4px; border-radius:3px; }
+.ccx-cell { aspect-ratio:1; width:100%; min-width:4px; border-radius:3px; position:relative; cursor:pointer; transition:transform .1s; }
+.ccx-cell:hover { transform:scale(1.3); z-index:10; }
 .ccx-heat-legend { display:flex; align-items:center; gap:3px; font-size:10px; color:var(--dsw-alias-label-caption); }
-.ccx-heat-legend .ccx-cell { width:10px; min-width:10px; aspect-ratio:1; }
+.ccx-heat-legend .ccx-cell { width:10px; min-width:10px; aspect-ratio:1; cursor:default; }
+.ccx-heat-legend .ccx-cell:hover { transform:none; }
+/* ── custom tooltip for heatmap and bars ── */
+.ccx-tooltip-wrap { position:relative; }
+.ccx-tooltip { position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%); padding:6px 10px; border-radius:8px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:11px; line-height:16px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .12s; z-index:100; box-shadow:var(--dsw-shadow-lv2, 0 4px 12px rgba(0,0,0,.15)); }
+.ccx-tooltip.visible { opacity:1; }
+.ccx-tooltip-date { font-weight:500; color:var(--dsw-alias-label-primary); }
+.ccx-tooltip-value { color:var(--dsw-alias-state-business-primary); font-family:var(--ds-font-family-code); }
 .ccx-weekbars { display:flex; align-items:flex-end; gap:4px; height:120px; padding:4px 0; width:100%; }
-.ccx-weekbar { flex:1; min-width:6px; max-width:26px; border-radius:3px 3px 0 0; background:var(--dsw-alias-state-business-primary); opacity:.85; position:relative; }
+.ccx-weekbar { flex:1; min-width:6px; max-width:26px; border-radius:3px 3px 0 0; background:var(--dsw-alias-state-business-primary); opacity:.85; position:relative; cursor:pointer; transition:opacity .12s; }
 .ccx-weekbar:hover { opacity:1; }
 .ccx-cum-svg { width:100%; height:140px; }
 /* ── subagent card (session header utilities) ── */
@@ -126,21 +144,40 @@ html.ccx-wallpaper, html.ccx-wallpaper body {
 .ccx-agent-dot.running { background:var(--dsw-alias-state-success-primary); animation:ccx-pulse 1.2s ease-in-out infinite; }
 .ccx-agent-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ccx-agent-mode { flex:none; font-size:10px; color:var(--dsw-alias-label-caption); border:1px solid var(--dsw-alias-border-l1); border-radius:5px; padding:0 5px; }
-/* ── pet widget (shell overlay) ── */
-.ccx-pet { position:fixed; right:20px; bottom:20px; z-index:90; display:flex; flex-direction:column; align-items:flex-end; gap:6px; pointer-events:auto; user-select:none; }
-.ccx-pet-bubble { max-width:220px; padding:6px 10px; border-radius:12px 12px 2px 12px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; line-height:18px; box-shadow:var(--dsw-shadow-lv2, 0 8px 24px rgba(0,0,0,.18)); }
+/* ── pet widget (shell overlay) — draggable floating ── */
+.ccx-pet { position:fixed; z-index:90; pointer-events:auto; user-select:none; }
+.ccx-pet.dragging { cursor:grabbing; }
+.ccx-pet.dragging .ccx-pet-body { opacity:0.8; }
+.ccx-pet-bubble { position:absolute; bottom:calc(100% + 6px); right:0; max-width:220px; padding:6px 10px; border-radius:12px 12px 2px 12px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; line-height:18px; box-shadow:var(--dsw-shadow-lv2, 0 8px 24px rgba(0,0,0,.18)); white-space:nowrap; pointer-events:none; }
 .ccx-pet-bubble.needs { border-color:var(--dsw-alias-state-warn-primary); color:var(--dsw-alias-state-warn-label); }
-.ccx-pet-body { width:64px; height:64px; cursor:pointer; color:var(--dsw-alias-state-business-primary); filter:drop-shadow(0 4px 10px rgba(0,0,0,.25)); }
+.ccx-pet-body { width:64px; height:64px; cursor:grab; color:var(--dsw-alias-state-business-primary); filter:drop-shadow(0 4px 10px rgba(0,0,0,.25)); }
+.ccx-pet-body:active { cursor:grabbing; }
 .ccx-pet-body svg { width:100%; height:100%; display:block; }
 .ccx-pet-anim { transform-origin:50% 90%; }
+/* Base animations by state */
 .ccx-pet[data-state="idle"] .ccx-pet-anim { animation:ccx-pet-idle 3.2s ease-in-out infinite; }
 .ccx-pet[data-state="thinking"] .ccx-pet-anim { animation:ccx-pet-think 1.6s ease-in-out infinite; }
 .ccx-pet[data-state="working"] .ccx-pet-anim { animation:ccx-pet-work .7s ease-in-out infinite; }
 .ccx-pet[data-state="needs"] .ccx-pet-anim { animation:ccx-pet-needs .5s ease-in-out infinite; color:var(--dsw-alias-state-warn-primary); }
+/* Skin-specific idle animations */
+.ccx-pet[data-skin="dog"][data-state="idle"] .ccx-pet-anim { animation:ccx-dog-idle 2.8s ease-in-out infinite; }
+.ccx-pet[data-skin="robot"][data-state="idle"] .ccx-pet-anim { animation:ccx-robot-idle 4s ease-in-out infinite; }
+.ccx-pet[data-skin="ghost"][data-state="idle"] .ccx-pet-anim { animation:ccx-ghost-idle 3.5s ease-in-out infinite; }
+/* Skin-specific working animations */
+.ccx-pet[data-skin="dog"][data-state="working"] .ccx-pet-anim { animation:ccx-dog-work .5s ease-in-out infinite; }
+.ccx-pet[data-skin="robot"][data-state="working"] .ccx-pet-anim { animation:ccx-robot-work .4s steps(2) infinite; }
+.ccx-pet[data-skin="ghost"][data-state="working"] .ccx-pet-anim { animation:ccx-ghost-work 1s ease-in-out infinite; }
+/* Keyframes */
 @keyframes ccx-pet-idle { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-2px) } }
 @keyframes ccx-pet-think { 0%,100% { transform:rotate(0deg) } 30% { transform:rotate(-4deg) } 70% { transform:rotate(4deg) } }
 @keyframes ccx-pet-work { 0%,100% { transform:translateY(0) scale(1) } 50% { transform:translateY(-5px) scale(1.03) } }
 @keyframes ccx-pet-needs { 0%,100% { transform:translateX(0) } 25% { transform:translateX(-3px) } 75% { transform:translateX(3px) } }
+@keyframes ccx-dog-idle { 0%,100% { transform:translateY(0) rotate(0deg) } 25% { transform:translateY(-1px) rotate(-2deg) } 75% { transform:translateY(-1px) rotate(2deg) } }
+@keyframes ccx-dog-work { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-8px) } }
+@keyframes ccx-robot-idle { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-1px) } }
+@keyframes ccx-robot-work { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-3px) } }
+@keyframes ccx-ghost-idle { 0%,100% { transform:translateY(0) scaleX(1) } 50% { transform:translateY(-4px) scaleX(1.02) } }
+@keyframes ccx-ghost-work { 0%,100% { transform:translateY(0) rotate(0deg) } 25% { transform:translateY(-6px) rotate(-3deg) } 75% { transform:translateY(-6px) rotate(3deg) } }
 .ccx-pet-dots span { animation:ccx-dot 1.2s infinite; }
 .ccx-pet-dots span:nth-child(2) { animation-delay:.2s }
 .ccx-pet-dots span:nth-child(3) { animation-delay:.4s }
