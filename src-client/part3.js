@@ -287,7 +287,8 @@
 			avatar: "",
 			quickPrompts: [],
 			petEnabled: true,
-			petSkin: "cat", // cat, dog, robot, ghost
+			petSkin: "cat",
+			wideChat: false,
 		};
 		/**
 		 * Client-side config store persisted in localStorage. The Web API only
@@ -422,6 +423,52 @@
 				};
 			}, "codex-clone: wallpaper");
 
+			// Wide chat mode: override DSH width CSS variables at the element level.
+			ctx.effect(() => {
+				const styledEls = new Set();
+				const applyWideChat = () => {
+					if (typeof document === "undefined") return;
+					const wide = config.get().wideChat === true;
+					const html = document.documentElement;
+					if (wide) {
+						html.classList.add("ccx-wide-chat");
+						// Find the conversation root element (has data-phase attribute)
+						// and override its CSS variables directly via inline style,
+						// because the variables are defined on a child element class
+						// which would otherwise override our html-level variables.
+						const roots = document.querySelectorAll("[data-phase]");
+						for (const el of roots) {
+							el.style.setProperty("--dsh-chat-content-width", "9999px", "important");
+							el.style.setProperty("--dsh-composer-card-max-width", "9999px", "important");
+							styledEls.add(el);
+						}
+					} else {
+						html.classList.remove("ccx-wide-chat");
+						for (const el of styledEls) {
+							el.style.removeProperty("--dsh-chat-content-width");
+							el.style.removeProperty("--dsh-composer-card-max-width");
+						}
+						styledEls.clear();
+					}
+				};
+				applyWideChat();
+				const offConfig = config.subscribe(applyWideChat);
+				// Re-scan periodically in case DOM changes (e.g. navigating sessions)
+				const scanInterval = setInterval(applyWideChat, 1000);
+				return () => {
+					offConfig();
+					clearInterval(scanInterval);
+					for (const el of styledEls) {
+						el.style.removeProperty("--dsh-chat-content-width");
+						el.style.removeProperty("--dsh-composer-card-max-width");
+					}
+					styledEls.clear();
+					if (typeof document !== "undefined") {
+						document.documentElement.classList.remove("ccx-wide-chat");
+					}
+				};
+			}, "codex-clone: wide chat mode");
+
 			// Settings pages.
 			const AppearanceSection = makeAppearanceSection(ctx, config, useConfig);
 			const ProfileSection = makeProfileSection(ctx, config, useConfig);
@@ -429,7 +476,7 @@
 				name: "settings.section",
 				id: "codex-appearance",
 				order: 90,
-				label: () => "Codex 外观",
+				label: () => "外观设置",
 			}, AppearanceSection)), "codex-clone: appearance settings");
 			ctx.effect(() => ctx.slots.inject("settings.section", () => ctx.slots.register({
 				name: "settings.section",

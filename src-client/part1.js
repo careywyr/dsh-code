@@ -4,6 +4,7 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+
 		const React = require("react");
 		const h = React.createElement;
 		const { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore } = React;
@@ -19,6 +20,34 @@ window.__ModuleLoader__.load({
 /* ── wallpaper layer (set on <html>) sits behind everything ── */
 html.ccx-wallpaper, html.ccx-wallpaper body {
 	background-color: transparent !important;
+}
+/* ── wide chat mode: override DSH width variables ── */
+html.ccx-wide-chat {
+	--dsh-chat-content-width: 9999px !important;
+	--dsh-composer-card-max-width: 9999px !important;
+}
+/* Elements tagged by JS as having restrictive max-width */
+html.ccx-wide-chat [data-ccx-wide-target] {
+	max-width: none !important;
+	width: 100% !important;
+	box-sizing: border-box !important;
+}
+/* Add horizontal padding so content doesn't touch edges */
+html.ccx-wide-chat [data-conversation-scroll] {
+	padding-left: 32px !important;
+	padding-right: 32px !important;
+}
+html.ccx-wide-chat [data-composer-seat] {
+	padding-left: 32px !important;
+	padding-right: 32px !important;
+	background: transparent !important;
+}
+/* HomeCards and CardsRow adapt */
+html.ccx-wide-chat .ccx-homecards {
+	max-width: 100% !important;
+}
+html.ccx-wide-chat .ccx-cards-row {
+	right: 56px;
 }
 /* ── home cards (input dock) ── */
 .ccx-homecards { display:flex; flex-direction:column; gap:10px; width:100%; max-width:var(--dsh-composer-card-max-width); margin:0 auto; padding:0 4px; position:relative; }

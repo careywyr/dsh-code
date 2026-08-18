@@ -520,6 +520,21 @@
 							)),
 						) : null,
 					),
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "聊天区域宽度"),
+						h("div", { className: "ccx-group-hint" }, "开启后聊天区域将占满整个可用宽度，而非居中窄栏。"),
+						h("div", { className: "ccx-row" },
+							h("label", { style: { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" } },
+								h("input", {
+									type: "checkbox",
+									checked: cfg.wideChat === true,
+									onChange: (e) => config.set("wideChat", e.target.checked),
+									style: { width: "16px", height: "16px", accentColor: "var(--dsw-alias-state-business-primary)" },
+								}),
+								h("span", null, "宽屏模式"),
+							),
+						),
+					),
 				);
 			};
 		}
