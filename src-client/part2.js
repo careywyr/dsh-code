@@ -376,7 +376,9 @@
 		//#endregion
 
 		//#region FileMention (@ 文件快捷引用)
-		const CCX_MENTION_LS_KEY = "dsh-codex-clone:mentions:v1";
+		const CCX_MENTION_LS_KEY = "dsh-code:mentions:v1";
+		/** Pre-rename storage key; migrated once on first load, kept for upgrades. */
+		const LEGACY_MENTION_LS_KEY = "dsh-codex-clone:mentions:v1";
 
 		/** Registry of inserted file/dir references (rel path -> "file"|"dir").
 		 *  Used to (a) locate chip ranges inside the composer text and
@@ -387,6 +389,16 @@
 			load() {
 				if (this.loaded) return;
 				this.loaded = true;
+				try {
+					// one-time upgrade from the pre-rename storage key
+					if (localStorage.getItem(CCX_MENTION_LS_KEY) === null) {
+						const legacy = localStorage.getItem(LEGACY_MENTION_LS_KEY);
+						if (legacy !== null) {
+							localStorage.setItem(CCX_MENTION_LS_KEY, legacy);
+							localStorage.removeItem(LEGACY_MENTION_LS_KEY);
+						}
+					}
+				} catch { /* storage unavailable */ }
 				try {
 					const raw = localStorage.getItem(CCX_MENTION_LS_KEY);
 					if (raw) {
@@ -531,7 +543,7 @@
 					try {
 						dispose = svc.registerSource(source);
 					} catch (error) {
-						console.warn("codex-clone: @ file source registration failed:", error);
+						console.warn("dsh-code: @ file source registration failed:", error);
 						if (timer !== null) { clearInterval(timer); timer = null; }
 						return;
 					}
@@ -1180,7 +1192,9 @@
 			return null;
 		}
 		/** Root-scoped floating pet widget with drag support, multiple skins, and config. */
-		const PET_POS_KEY = "dsh-codex-clone:pet-position:v1";
+		const PET_POS_KEY = "dsh-code:pet-position:v1";
+		/** Pre-rename storage key; migrated once on first load, kept for upgrades. */
+		const LEGACY_PET_POS_KEY = "dsh-codex-clone:pet-position:v1";
 		function makePetWidget(ctx, useConfig) {
 			return function PetWidget() {
 				const cfg = useConfig();
@@ -1194,6 +1208,14 @@
 				const [hover, setHover] = useState(false);
 				const [pos, setPos] = useState(() => {
 					try {
+						// one-time upgrade from the pre-rename storage key
+						if (localStorage.getItem(PET_POS_KEY) === null) {
+							const legacy = localStorage.getItem(LEGACY_PET_POS_KEY);
+							if (legacy !== null) {
+								localStorage.setItem(PET_POS_KEY, legacy);
+								localStorage.removeItem(LEGACY_PET_POS_KEY);
+							}
+						}
 						const saved = localStorage.getItem(PET_POS_KEY);
 						if (saved) return JSON.parse(saved);
 					} catch { /* ignore */ }

@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-	id: "dsh-codex-clone",
+	id: "dsh-code",
 	factory: (require) => {
 		var module = { exports: {} };
 		var exports = module.exports;
@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({
 		const { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore } = React;
 
 		//#region styles
-		const TAG_ID = "dsh-codex-clone/main.css";
+		const TAG_ID = "dsh-code/main.css";
 		const CSS = `
 /* ── home layout: composer stack anchored to the bottom on the hero screen ── */
 [data-phase="hero"] > [data-conversation-scroll] {
@@ -296,7 +296,7 @@ html.ccx-wide-chat .ccx-cards-row {
 			if (typeof document === "undefined") return () => {};
 			if (document.querySelector("style[data-plugin-css=" + JSON.stringify(TAG_ID) + "]") !== null) return () => {};
 			const tag = document.createElement("style");
-			tag.dataset.plugin = "dsh-codex-clone";
+			tag.dataset.plugin = "dsh-code";
 			tag.dataset.pluginCss = TAG_ID;
 			tag.textContent = CSS;
 			document.head.appendChild(tag);

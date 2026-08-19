@@ -59,11 +59,29 @@ node install.mjs   # 自动完成链接与注册（幂等，可重复执行）
   该功能在**首次安装或更新后需重启一次 dsh web** 才生效；重启前菜单会显示
   「文件搜索待启用」提示。
 
+## 从旧版（dsh-codex-clone）升级
+
+本插件由 `dsh-codex-clone` 更名为 `dsh-code`。老用户只需：
+
+```sh
+git pull
+node install.mjs   # 自动清理旧的 dsh-codex-clone 注册并注册 dsh-code
+# 重启 dsh web 服务，然后刷新浏览器
+```
+
+`install.mjs` 会自动完成迁移：删除旧的 `dsh-codex-clone` 符号链接、移除
+`cordis.patch.yml` 中旧的 insert 块，再注册新的 `dsh-code`。
+浏览器本地存储（主题 / 壁纸 / 快捷提示词 / 宠物位置等）也会在首次打开页面时
+自动从旧键（`dsh-codex-clone:*`）迁移到新键（`dsh-code:*`），**配置不会丢失**。
+
+> 如果之前是手动注册的，请先手动删除 `cordis.patch.yml` 里 `dsh-codex-clone`
+> 的 insert 块和两个旧符号链接，再执行上面的步骤。
+
 ## 卸载
 
-1. 删除 `~/.dsh/profiles/web/cordis.patch.yml` 中 `dsh-codex-clone` 的 insert 块；
-2. 删除符号链接：`~/.dsh/profiles/node_modules/dsh-codex-clone` 与 dsh 安装树
-   `node_modules/dsh-codex-clone`；
+1. 删除 `~/.dsh/profiles/web/cordis.patch.yml` 中 `dsh-code` 的 insert 块；
+2. 删除符号链接：`~/.dsh/profiles/node_modules/dsh-code` 与 dsh 安装树
+   `node_modules/dsh-code`；
 3. 重启 `dsh web`。
 
 ## 许可

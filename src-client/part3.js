@@ -271,7 +271,9 @@
 		//#endregion
 
 		//#region apply
-		const CONFIG_STORAGE_KEY = "dsh-codex-clone:config:v1";
+		const CONFIG_STORAGE_KEY = "dsh-code:config:v1";
+		/** Pre-rename storage key; migrated once on first load, kept for upgrades. */
+		const LEGACY_CONFIG_STORAGE_KEY = "dsh-codex-clone:config:v1";
 		const CONFIG_DEFAULTS = {
 			themeFlavor: "mocha",
 			backgroundImage: "",
@@ -289,7 +291,20 @@
 		 * exposes a fixed allow-list of settings namespaces to the browser, so
 		 * this plugin owns its persistence directly.
 		 */
+		/** One-time upgrade: copy the pre-rename config blob to the new key. */
+		function migrateLegacyConfigKey() {
+			try {
+				if (localStorage.getItem(CONFIG_STORAGE_KEY) === null) {
+					const legacy = localStorage.getItem(LEGACY_CONFIG_STORAGE_KEY);
+					if (legacy !== null) {
+						localStorage.setItem(CONFIG_STORAGE_KEY, legacy);
+						localStorage.removeItem(LEGACY_CONFIG_STORAGE_KEY);
+					}
+				}
+			} catch { /* storage unavailable */ }
+		}
 		function makeConfigStore() {
+			migrateLegacyConfigKey();
 			let value = { ...CONFIG_DEFAULTS };
 			try {
 				const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
@@ -317,7 +332,7 @@
 		}
 		const inject = ["slots", "theme", "connection", "timer"];
 		function apply(ctx) {
-			ctx.effect(installStyles, "codex-clone: stylesheet");
+			ctx.effect(installStyles, "dsh-code: stylesheet");
 			const config = makeConfigStore();
 			// cross-tab sync: another tab's write re-reads storage in place
 			if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
@@ -325,7 +340,7 @@
 					const onStorage = (event) => { if (event.key === CONFIG_STORAGE_KEY) config.syncFromStorage(); };
 					window.addEventListener("storage", onStorage);
 					return () => window.removeEventListener("storage", onStorage);
-				}, "codex-clone: config cross-tab sync");
+				}, "dsh-code: config cross-tab sync");
 			}
 			const configSubscribe = (fn) => config.subscribe(fn);
 			const configGetSnapshot = () => config.get();
@@ -337,7 +352,7 @@
 					id,
 					colorScheme: flavor.scheme,
 					tokens: buildTokens(flavor.colors, flavor.scheme),
-				}), "codex-clone: theme " + id);
+				}), "dsh-code: theme " + id);
 			}
 
 			// Apply the persisted flavor (default mocha) whenever config changes.
@@ -351,7 +366,7 @@
 					try {
 						ctx.theme.setTheme(flavor);
 					} catch (error) {
-						console.error("[codex-clone] setTheme failed", flavor, String(error));
+						console.error("[dsh-code] setTheme failed", flavor, String(error));
 					}
 				};
 				applyFlavor();
@@ -361,7 +376,7 @@
 					for (const dispose of retries) dispose();
 					offConfig();
 				};
-			}, "codex-clone: theme flavor preference");
+			}, "dsh-code: theme flavor preference");
 
 			// Wallpaper: fixed background on <html> + translucent surface tokens.
 			let wallpaperDisposer = null;
@@ -395,7 +410,7 @@
 					const flavor = CATPPUCCIN[activeId] ?? CATPPUCCIN.mocha;
 					const p = flavor.colors;
 					const surfaceAlpha = Math.max(0.35, 1 - opacity);
-					wallpaperDisposer = ctx.theme.overrideTokens("codex-clone-wallpaper", {
+					wallpaperDisposer = ctx.theme.overrideTokens("dsh-code-wallpaper", {
 						"--dsw-alias-bg-base": {
 							light: rgba(CATPPUCCIN.latte.colors.base, surfaceAlpha),
 							dark: rgba(p.base, surfaceAlpha),
@@ -415,7 +430,7 @@
 					if (wallpaperDisposer !== null) { wallpaperDisposer(); wallpaperDisposer = null; }
 					wallpaperKey = null;
 				};
-			}, "codex-clone: wallpaper");
+			}, "dsh-code: wallpaper");
 
 			// Wide chat mode: override DSH width CSS variables at the element level.
 			ctx.effect(() => {
@@ -461,7 +476,7 @@
 						document.documentElement.classList.remove("ccx-wide-chat");
 					}
 				};
-			}, "codex-clone: wide chat mode");
+			}, "dsh-code: wide chat mode");
 
 			// Settings pages.
 			const AppearanceSection = makeAppearanceSection(ctx, config, useConfig);
@@ -471,13 +486,13 @@
 				id: "codex-appearance",
 				order: 90,
 				label: () => "外观设置",
-			}, AppearanceSection)), "codex-clone: appearance settings");
+			}, AppearanceSection)), "dsh-code: appearance settings");
 			ctx.effect(() => ctx.slots.inject("settings.section", () => ctx.slots.register({
 				name: "settings.section",
 				id: "codex-profile",
 				order: 91,
 				label: () => "个人资料",
-			}, ProfileSection)), "codex-clone: profile settings");
+			}, ProfileSection)), "dsh-code: profile settings");
 
 			// Home quick-prompt cards above the composer (hero phase only).
 			const HomeCards = makeHomeCards(ctx, config, useConfig);
@@ -485,7 +500,7 @@
 				name: "conversation.input.dock",
 				id: "codex-home-cards",
 				order: -10,
-			}, HomeCards)), "codex-clone: home cards");
+			}, HomeCards)), "dsh-code: home cards");
 
 			// Git change-stats card and Agent card - in input dock but visually positioned below tab bar.
 			const GitCard = makeGitCard(ctx);
@@ -502,26 +517,26 @@
 				name: "conversation.input.dock",
 				id: "codex-cards-row",
 				order: -20,
-			}, CardsRow)), "codex-clone: cards row");
+			}, CardsRow)), "dsh-code: cards row");
 
 			// Pet: session-scoped state bridge + root-scoped floating widget.
 			ctx.effect(() => ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
 				name: "conversation.input.dock",
 				id: "codex-pet-bridge",
 				order: 30,
-			}, PetBridge)), "codex-clone: pet state bridge");
+			}, PetBridge)), "dsh-code: pet state bridge");
 			// Download button mover: watches DOM and moves download button to bottom-right.
 			ctx.effect(() => ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
 				name: "conversation.input.dock",
 				id: "codex-download-mover",
 				order: 31,
-			}, DownloadButtonMover)), "codex-clone: download button mover");
+			}, DownloadButtonMover)), "dsh-code: download button mover");
 			const PetWidget = makePetWidget(ctx, useConfig);
 			ctx.effect(() => ctx.slots.inject("shell.overlay", () => ctx.slots.register({
 				name: "shell.overlay",
 				id: "codex-pet",
 				order: 50,
-			}, PetWidget)), "codex-clone: pet widget");
+			}, PetWidget)), "dsh-code: pet widget");
 
 			// '$' skills menu in the composer overlay.
 			const SkillDollarMenu = makeSkillDollarMenu(ctx);
@@ -529,18 +544,18 @@
 				name: "conversation.input.overlay",
 				id: "codex-skill-dollar",
 				order: 10,
-			}, SkillDollarMenu)), "codex-clone: dollar skill menu");
+			}, SkillDollarMenu)), "dsh-code: dollar skill menu");
 
 			// '@' file mention: native trigger-pipeline source (candidate menu)
 			// + chip overlay that renders inserted paths as basename chips.
 			const startFileMentionSource = makeFileMentionSource(ctx);
-			ctx.effect(() => startFileMentionSource(), "codex-clone: @ file mention source");
+			ctx.effect(() => startFileMentionSource(), "dsh-code: @ file mention source");
 			const MentionChips = makeMentionChips(ctx);
 			ctx.effect(() => ctx.slots.inject("conversation.input.overlay", () => ctx.slots.register({
 				name: "conversation.input.overlay",
 				id: "codex-mention-chips",
 				order: 11,
-			}, MentionChips)), "codex-clone: mention chips overlay");
+			}, MentionChips)), "dsh-code: mention chips overlay");
 		}
 		//#endregion
 
