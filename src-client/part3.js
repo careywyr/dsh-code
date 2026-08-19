@@ -33,20 +33,16 @@
 			const [tooltip, setTooltip] = useState(null); // { x, y, iso, tokens }
 			const containerRef = useRef(null);
 			const children = [];
-			// month labels (grid row 1)
+			// month labels (bottom row)
 			let lastMonth = -1;
 			for (let w = 0; w < weeks; w += 1) {
 				const cell = cells[w * 7];
 				const month = new Date(cell.iso + "T00:00:00").getMonth();
 				if (month !== lastMonth) {
-					children.push(h("span", { key: "m" + w, className: "ccx-heat-month", style: { gridColumn: w + 2, gridRow: 1 } }, (month + 1) + "月"));
+					children.push(h("span", { key: "m" + w, className: "ccx-heat-month", style: { gridColumn: w + 1, gridRow: 8 } }, (month + 1) + "月"));
 					lastMonth = month;
 				}
 			}
-			// weekday labels (grid column 1)
-			["一", "三", "五"].forEach((label, i) => {
-				children.push(h("span", { key: "d" + label, className: "ccx-heat-daylabel", style: { gridColumn: 1, gridRow: i * 2 + 2 } }, label));
-			});
 			// day cells
 			for (let w = 0; w < weeks; w += 1) {
 				for (let r = 0; r < 7; r += 1) {
@@ -56,8 +52,8 @@
 						key: cell.iso,
 						className: "ccx-cell",
 						style: {
-							gridColumn: w + 2,
-							gridRow: r + 2,
+							gridColumn: w + 1,
+							gridRow: r + 1,
 							background: cell.future ? "transparent" : levelColor(level),
 							visibility: cell.future ? "hidden" : "visible",
 						},
@@ -86,7 +82,7 @@
 				},
 					h("span", { className: "ccx-tooltip-date" }, tooltip.iso),
 					" · ",
-					h("span", { className: "ccx-tooltip-value" }, formatTokens(tooltip.tokens) + " tokens"),
+					h("span", { className: "ccx-tooltip-value" }, formatTokens(tooltip.tokens) + " Token"),
 				) : null,
 			);
 		}
@@ -138,7 +134,7 @@
 				},
 					h("span", { className: "ccx-tooltip-date" }, "周 " + tooltip.iso),
 					" · ",
-					h("span", { className: "ccx-tooltip-value" }, formatTokens(tooltip.tokens) + " tokens"),
+					h("span", { className: "ccx-tooltip-value" }, formatTokens(tooltip.tokens) + " Token"),
 				) : null,
 			);
 		}
@@ -164,7 +160,7 @@
 					h("path", { d: area, fill: "var(--dsw-alias-state-business-primary)", opacity: 0.12, stroke: "none" }),
 					h("polyline", { points, fill: "none", stroke: "var(--dsw-alias-state-business-primary)", strokeWidth: 2, vectorEffect: "non-scaling-stroke" }),
 				),
-				h("div", { className: "ccx-note" }, "累计曲线 · 近 " + Math.min(180, Object.keys(daily).length) + " 天 · 合计 " + formatTokens(total) + " tokens"),
+				h("div", { className: "ccx-note" }, "累计曲线 · 近 " + Math.min(180, Object.keys(daily).length) + " 天 · 合计 " + formatTokens(total) + " Token"),
 			);
 		}
 		function makeProfileSection(ctx, config, useConfig) {
@@ -199,6 +195,7 @@
 				const activeDays = Object.keys(daily).filter((k) => (daily[k]?.tokens ?? 0) > 0).length;
 				return h("div", { className: "ccx-section" },
 					h("div", { className: "ccx-profile-head" },
+						h("button", { type: "button", className: "ccx-btn ccx-refresh", onClick: refresh }, "刷新"),
 						h("div", { className: "ccx-avatar-wrap" },
 							avatar !== ""
 								? h("img", { className: "ccx-avatar", src: avatar, alt: "avatar" })
@@ -230,30 +227,31 @@
 								onKeyDown: (e) => { if (e.key === "Enter") e.currentTarget.blur(); },
 							}),
 							h("div", { className: "ccx-profile-sub" },
+								username !== "" ? h("span", null, "@" + username) : null,
+								username !== "" ? "·" : null,
 								stats?.memberSince ? "加入于 " + new Date(stats.memberSince).toLocaleDateString() + " · 活跃 " + activeDays + " 天 · " + (stats.sessionCount ?? 0) + " 个会话" : "DeepSeek Harness · Codex 风格"),
 						),
-						h("button", { type: "button", className: "ccx-btn ccx-refresh", onClick: refresh }, "刷新"),
 					),
 					h("div", { className: "ccx-statgrid" },
 						h("div", { className: "ccx-stat" },
 							h("div", { className: "ccx-stat-value" }, stats ? formatTokens(stats.totalTokens) : "…"),
-							h("div", { className: "ccx-stat-label" }, "累计 Tokens")),
+							h("div", { className: "ccx-stat-label" }, "累计 Token 数")),
 						h("div", { className: "ccx-stat" },
 							h("div", { className: "ccx-stat-value" }, stats ? formatTokens(stats.peakTokens) : "…"),
-							h("div", { className: "ccx-stat-label" }, "峰值 Tokens / 单请求")),
+							h("div", { className: "ccx-stat-label" }, "峰值 Token 数")),
 						h("div", { className: "ccx-stat" },
 							h("div", { className: "ccx-stat-value" }, stats ? formatDuration(stats.longestChatMs) : "…"),
 							h("div", { className: "ccx-stat-label" }, "最长聊天时长")),
 						h("div", { className: "ccx-stat" },
 							h("div", { className: "ccx-stat-value" }, stats ? stats.currentStreak + " 天" : "…"),
-							h("div", { className: "ccx-stat-label" }, "当前连续")),
+							h("div", { className: "ccx-stat-label" }, "当前连续天数")),
 						h("div", { className: "ccx-stat" },
 							h("div", { className: "ccx-stat-value" }, stats ? stats.longestStreak + " 天" : "…"),
-							h("div", { className: "ccx-stat-label" }, "最长连续")),
+							h("div", { className: "ccx-stat-label" }, "最长连续天数")),
 					),
 					h("div", { className: "ccx-group" },
 						h("div", { className: "ccx-heat-head" },
-							h("div", { className: "ccx-group-title" }, "活动热力图"),
+							h("div", { className: "ccx-group-title" }, "Token 活动"),
 							h("div", { className: "ccx-seg" },
 								h("button", { type: "button", className: mode === "daily" ? "on" : "", onClick: () => setMode("daily") }, "每日"),
 								h("button", { type: "button", className: mode === "weekly" ? "on" : "", onClick: () => setMode("weekly") }, "每周"),
@@ -262,12 +260,7 @@
 						stats === null
 							? h("div", { className: "ccx-note" }, "正在加载活动数据…")
 							: mode === "daily"
-								? h(React.Fragment, null,
-									h(DailyHeatmap, { daily }),
-									h("div", { className: "ccx-heat-legend" },
-										h("span", null, "少"),
-										[0, 1, 2, 3, 4].map((lv) => h("span", { key: lv, className: "ccx-cell", style: { background: levelColor(lv) } })),
-										h("span", null, "多")))
+								? h(DailyHeatmap, { daily })
 								: mode === "weekly"
 									? h(WeeklyBars, { daily })
 									: h(CumulativeChart, { daily }),
@@ -288,6 +281,7 @@
 			quickPrompts: [],
 			petEnabled: true,
 			petSkin: "cat",
+			petSize: 76,
 			wideChat: false,
 		};
 		/**
@@ -536,6 +530,17 @@
 				id: "codex-skill-dollar",
 				order: 10,
 			}, SkillDollarMenu)), "codex-clone: dollar skill menu");
+
+			// '@' file mention: native trigger-pipeline source (candidate menu)
+			// + chip overlay that renders inserted paths as basename chips.
+			const startFileMentionSource = makeFileMentionSource(ctx);
+			ctx.effect(() => startFileMentionSource(), "codex-clone: @ file mention source");
+			const MentionChips = makeMentionChips(ctx);
+			ctx.effect(() => ctx.slots.inject("conversation.input.overlay", () => ctx.slots.register({
+				name: "conversation.input.overlay",
+				id: "codex-mention-chips",
+				order: 11,
+			}, MentionChips)), "codex-clone: mention chips overlay");
 		}
 		//#endregion
 

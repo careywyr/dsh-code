@@ -42,9 +42,15 @@ html.ccx-wide-chat [data-composer-seat] {
 	padding-right: 32px !important;
 	background: transparent !important;
 }
-/* HomeCards and CardsRow adapt */
+/* HomeCards and CardsRow adapt: the composer card sits inside an input bar
+   padded by --dsh-composer-side-clearance, so inset the greeting and the
+   quick-prompt tiles by the same amount to keep their edges aligned with
+   the composer card in wide mode (in normal mode the centered max-width
+   already matches the card box). */
 html.ccx-wide-chat .ccx-homecards {
-	max-width: 100% !important;
+	width: auto !important;
+	max-width: none !important;
+	margin: 0 var(--dsh-composer-side-clearance, 16px) !important;
 }
 html.ccx-wide-chat .ccx-cards-row {
 	right: 56px;
@@ -57,6 +63,14 @@ html.ccx-wide-chat .ccx-cards-row {
 .ccx-branch-name { color:var(--dsw-alias-label-primary); font-weight:500; }
 .ccx-greet { display:flex; flex-direction:column; gap:2px; padding:0 6px 2px; }
 .ccx-greet-title { font-size:20px; font-weight:600; color:var(--dsw-alias-label-primary); line-height:28px; }
+/* ── task list (todo panel) above the composer: DSH sizes it narrower than the
+   composer card (extra dock-inset subtractions); match the card's box instead.
+   The card spans 100% minus the input bar's side-clearance padding, capped by
+   --dsh-composer-card-max-width. ── */
+[data-testid="todo-panel"] {
+	width: calc(100% - var(--dsh-composer-side-clearance, 16px) - var(--dsh-composer-side-clearance, 16px)) !important;
+	max-width: var(--dsh-composer-card-max-width) !important;
+}
 .ccx-tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:8px; }
 .ccx-tile { display:flex; flex-direction:column; gap:4px; text-align:left; padding:10px 12px; border-radius:14px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 82%, transparent); color:var(--dsw-alias-label-primary); cursor:pointer; font:inherit; transition:border-color .12s, background-color .12s, transform .12s; backdrop-filter:blur(6px); }
 .ccx-tile:hover { border-color:var(--dsw-alias-state-business-primary); background:var(--dsw-alias-interactive-bg-hover); transform:translateY(-1px); }
@@ -94,6 +108,12 @@ html.ccx-wide-chat .ccx-cards-row {
 .ccx-skill-item.active { background:var(--dsw-alias-interactive-bg-hover-accent); }
 .ccx-skill-item-name { font-weight:500; flex:none; font-family:var(--ds-font-family-code); }
 .ccx-skill-item-desc { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dsw-alias-label-caption); font-size:12px; }
+/* ── @ file-mention chips (opaque tags covering the raw path text) ── */
+.ccx-mention-overlay { position:fixed; z-index:60; pointer-events:none; overflow:hidden; }
+.ccx-mention-mirror { position:fixed; left:0; top:0; z-index:-1; visibility:hidden; pointer-events:none; overflow:hidden; }
+.ccx-chip { position:absolute; display:inline-flex; align-items:center; gap:4px; padding:0 6px; border-radius:6px; border:1px solid; box-sizing:border-box; overflow:hidden; white-space:nowrap; font-family:var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace); }
+.ccx-chip svg { flex:none; }
+.ccx-chip-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* ── settings sections ── */
 .ccx-section { display:flex; flex-direction:column; gap:22px; padding:4px 2px 24px; }
 .ccx-group { display:flex; flex-direction:column; gap:10px; }
@@ -123,32 +143,31 @@ html.ccx-wide-chat .ccx-cards-row {
 .ccx-iconbtn { flex:none; width:26px; height:26px; border:none; border-radius:8px; background:transparent; color:var(--dsw-alias-label-caption); cursor:pointer; font-size:13px; }
 .ccx-iconbtn:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-state-error-primary); }
 /* ── profile page ── */
-.ccx-profile-head { display:flex; align-items:center; gap:16px; padding:8px 2px 4px; }
+.ccx-profile-head { position:relative; display:flex; flex-direction:column; align-items:center; gap:12px; padding:28px 2px 8px; text-align:center; }
 .ccx-avatar-wrap { position:relative; flex:none; }
-.ccx-avatar { width:64px; height:64px; border-radius:50%; object-fit:cover; display:block; border:2px solid var(--dsw-alias-border-l2); }
-.ccx-avatar-fallback { width:64px; height:64px; border-radius:50%; display:grid; place-items:center; font-size:26px; font-weight:600; color:#fff; background:linear-gradient(135deg, var(--dsw-alias-state-business-primary), var(--dsw-static-purple-400, #9d7cd8)); }
-.ccx-avatar-edit { position:absolute; right:-2px; bottom:-2px; width:22px; height:22px; border-radius:50%; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-secondary); cursor:pointer; font-size:11px; display:grid; place-items:center; }
-.ccx-profile-id { display:flex; flex-direction:column; gap:2px; min-width:0; }
-.ccx-profile-name-input { font-size:18px; font-weight:600; color:var(--dsw-alias-label-primary); background:transparent; border:none; border-bottom:1px dashed transparent; outline:none; padding:0 0 2px; max-width:280px; }
+.ccx-avatar { width:96px; height:96px; border-radius:50%; object-fit:cover; display:block; border:2px solid var(--dsw-alias-border-l2); }
+.ccx-avatar-fallback { width:96px; height:96px; border-radius:50%; display:grid; place-items:center; font-size:38px; font-weight:600; color:#fff; background:linear-gradient(135deg, var(--dsw-alias-state-business-primary), var(--dsw-static-purple-400, #9d7cd8)); }
+.ccx-avatar-edit { position:absolute; right:2px; bottom:2px; width:24px; height:24px; border-radius:50%; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-secondary); cursor:pointer; font-size:11px; display:grid; place-items:center; }
+.ccx-profile-id { display:flex; flex-direction:column; align-items:center; gap:6px; min-width:0; }
+.ccx-profile-name-input { font-size:22px; font-weight:600; color:var(--dsw-alias-label-primary); background:transparent; border:none; border-bottom:1px dashed transparent; outline:none; padding:0 0 2px; max-width:320px; text-align:center; }
 .ccx-profile-name-input:hover, .ccx-profile-name-input:focus { border-bottom-color:var(--dsw-alias-border-l2); }
-.ccx-profile-sub { font-size:12px; color:var(--dsw-alias-label-caption); }
-.ccx-statgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
-.ccx-stat { display:flex; flex-direction:column; gap:4px; padding:12px 14px; border-radius:14px; border:1px solid var(--dsw-alias-border-l1); background:var(--dsw-alias-bg-layer-1); }
-.ccx-stat-value { font-size:20px; font-weight:600; color:var(--dsw-alias-label-primary); font-variant-numeric:tabular-nums; line-height:26px; }
-.ccx-stat-label { font-size:12px; color:var(--dsw-alias-label-caption); }
+.ccx-profile-sub { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--dsw-alias-label-caption); }
+.ccx-profile-sub { flex-wrap:wrap; justify-content:center; }
+.ccx-statgrid { display:grid; grid-template-columns:repeat(5, 1fr); border:1px solid var(--dsw-alias-border-l1); border-radius:14px; background:var(--dsw-alias-bg-layer-1); overflow:hidden; }
+.ccx-stat { display:flex; flex-direction:column; align-items:center; gap:6px; padding:16px 8px; }
+.ccx-stat + .ccx-stat { border-left:1px solid var(--dsw-alias-border-l1); }
+.ccx-stat-value { font-size:18px; font-weight:600; color:var(--dsw-alias-label-primary); font-variant-numeric:tabular-nums; line-height:24px; white-space:nowrap; }
+.ccx-stat-label { font-size:12px; color:var(--dsw-alias-label-caption); white-space:nowrap; }
 .ccx-heat-head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
-.ccx-seg { display:flex; border:1px solid var(--dsw-alias-border-l2); border-radius:10px; overflow:hidden; }
-.ccx-seg button { border:none; background:transparent; color:var(--dsw-alias-label-secondary); font-size:12px; padding:6px 14px; cursor:pointer; }
-.ccx-seg button.on { background:var(--dsw-alias-interactive-bg-hover-accent); color:var(--dsw-alias-label-primary); font-weight:500; }
+.ccx-heat-head .ccx-group-title { font-size:15px; font-weight:600; }
+.ccx-seg { display:flex; gap:4px; }
+.ccx-seg button { border:none; background:transparent; color:var(--dsw-alias-label-caption); font-size:13px; padding:4px 10px; cursor:pointer; border-radius:8px; }
+.ccx-seg button.on { color:var(--dsw-alias-label-primary); font-weight:500; }
 /* full-width responsive contribution grid: 52 week columns stretch to the container */
-.ccx-heat { display:grid; grid-template-columns:22px repeat(52, minmax(4px, 1fr)); gap:3px; width:100%; }
-.ccx-heat-month { font-size:10px; color:var(--dsw-alias-label-caption); height:14px; line-height:14px; overflow:visible; white-space:nowrap; }
-.ccx-heat-daylabel { font-size:9px; color:var(--dsw-alias-label-caption); text-align:right; padding-right:2px; align-self:center; }
+.ccx-heat { display:grid; grid-template-columns:repeat(52, minmax(4px, 1fr)); gap:3px; width:100%; }
+.ccx-heat-month { font-size:10px; color:var(--dsw-alias-label-caption); height:16px; line-height:16px; overflow:visible; white-space:nowrap; }
 .ccx-cell { aspect-ratio:1; width:100%; min-width:4px; border-radius:3px; position:relative; cursor:pointer; transition:transform .1s; }
 .ccx-cell:hover { transform:scale(1.3); z-index:10; }
-.ccx-heat-legend { display:flex; align-items:center; gap:3px; font-size:10px; color:var(--dsw-alias-label-caption); }
-.ccx-heat-legend .ccx-cell { width:10px; min-width:10px; aspect-ratio:1; cursor:default; }
-.ccx-heat-legend .ccx-cell:hover { transform:none; }
 /* ── custom tooltip for heatmap and bars ── */
 .ccx-tooltip-wrap { position:relative; }
 .ccx-tooltip { position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%); padding:6px 10px; border-radius:8px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:11px; line-height:16px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .12s; z-index:100; box-shadow:var(--dsw-shadow-lv2, 0 4px 12px rgba(0,0,0,.15)); }
@@ -173,46 +192,105 @@ html.ccx-wide-chat .ccx-cards-row {
 .ccx-agent-dot.running { background:var(--dsw-alias-state-success-primary); animation:ccx-pulse 1.2s ease-in-out infinite; }
 .ccx-agent-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ccx-agent-mode { flex:none; font-size:10px; color:var(--dsw-alias-label-caption); border:1px solid var(--dsw-alias-border-l1); border-radius:5px; padding:0 5px; }
-/* ── pet widget (shell overlay) — draggable floating ── */
+/* ── pet widget (shell overlay) — Codex-style animated companion ── */
 .ccx-pet { position:fixed; z-index:90; pointer-events:auto; user-select:none; }
 .ccx-pet.dragging { cursor:grabbing; }
-.ccx-pet.dragging .ccx-pet-body { opacity:0.8; }
-.ccx-pet-bubble { position:absolute; bottom:calc(100% + 6px); right:0; max-width:220px; padding:6px 10px; border-radius:12px 12px 2px 12px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; line-height:18px; box-shadow:var(--dsw-shadow-lv2, 0 8px 24px rgba(0,0,0,.18)); white-space:nowrap; pointer-events:none; }
+.ccx-pet.dragging .ccx-pet-body { opacity:0.85; }
+.ccx-pet-bubble { position:absolute; bottom:calc(100% + 2px); right:0; max-width:240px; padding:6px 10px; border-radius:12px 12px 2px 12px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; line-height:18px; box-shadow:var(--dsw-shadow-lv2, 0 8px 24px rgba(0,0,0,.18)); white-space:nowrap; pointer-events:none; }
 .ccx-pet-bubble.needs { border-color:var(--dsw-alias-state-warn-primary); color:var(--dsw-alias-state-warn-label); }
-.ccx-pet-body { width:64px; height:64px; cursor:grab; color:var(--dsw-alias-state-business-primary); filter:drop-shadow(0 4px 10px rgba(0,0,0,.25)); }
+.ccx-pet-body { width:76px; height:76px; cursor:grab; color:var(--dsw-alias-state-business-primary); filter:drop-shadow(0 6px 14px rgba(0,0,0,.28)); --pp-hi:color-mix(in srgb, currentColor 58%, white); --pp-lo:color-mix(in srgb, currentColor 78%, black); --pp-line:color-mix(in srgb, currentColor 42%, black); }
 .ccx-pet-body:active { cursor:grabbing; }
-.ccx-pet-body svg { width:100%; height:100%; display:block; }
-.ccx-pet-anim { transform-origin:50% 90%; }
-/* Base animations by state */
-.ccx-pet[data-state="idle"] .ccx-pet-anim { animation:ccx-pet-idle 3.2s ease-in-out infinite; }
-.ccx-pet[data-state="thinking"] .ccx-pet-anim { animation:ccx-pet-think 1.6s ease-in-out infinite; }
-.ccx-pet[data-state="working"] .ccx-pet-anim { animation:ccx-pet-work .7s ease-in-out infinite; }
-.ccx-pet[data-state="needs"] .ccx-pet-anim { animation:ccx-pet-needs .5s ease-in-out infinite; color:var(--dsw-alias-state-warn-primary); }
-/* Skin-specific idle animations */
-.ccx-pet[data-skin="dog"][data-state="idle"] .ccx-pet-anim { animation:ccx-dog-idle 2.8s ease-in-out infinite; }
-.ccx-pet[data-skin="robot"][data-state="idle"] .ccx-pet-anim { animation:ccx-robot-idle 4s ease-in-out infinite; }
-.ccx-pet[data-skin="ghost"][data-state="idle"] .ccx-pet-anim { animation:ccx-ghost-idle 3.5s ease-in-out infinite; }
-/* Skin-specific working animations */
-.ccx-pet[data-skin="dog"][data-state="working"] .ccx-pet-anim { animation:ccx-dog-work .5s ease-in-out infinite; }
-.ccx-pet[data-skin="robot"][data-state="working"] .ccx-pet-anim { animation:ccx-robot-work .4s steps(2) infinite; }
-.ccx-pet[data-skin="ghost"][data-state="working"] .ccx-pet-anim { animation:ccx-ghost-work 1s ease-in-out infinite; }
-/* Keyframes */
-@keyframes ccx-pet-idle { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-2px) } }
-@keyframes ccx-pet-think { 0%,100% { transform:rotate(0deg) } 30% { transform:rotate(-4deg) } 70% { transform:rotate(4deg) } }
-@keyframes ccx-pet-work { 0%,100% { transform:translateY(0) scale(1) } 50% { transform:translateY(-5px) scale(1.03) } }
-@keyframes ccx-pet-needs { 0%,100% { transform:translateX(0) } 25% { transform:translateX(-3px) } 75% { transform:translateX(3px) } }
-@keyframes ccx-dog-idle { 0%,100% { transform:translateY(0) rotate(0deg) } 25% { transform:translateY(-1px) rotate(-2deg) } 75% { transform:translateY(-1px) rotate(2deg) } }
-@keyframes ccx-dog-work { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-8px) } }
-@keyframes ccx-robot-idle { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-1px) } }
-@keyframes ccx-robot-work { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-3px) } }
-@keyframes ccx-ghost-idle { 0%,100% { transform:translateY(0) scaleX(1) } 50% { transform:translateY(-4px) scaleX(1.02) } }
-@keyframes ccx-ghost-work { 0%,100% { transform:translateY(0) rotate(0deg) } 25% { transform:translateY(-6px) rotate(-3deg) } 75% { transform:translateY(-6px) rotate(3deg) } }
+.ccx-pet-body svg { width:100%; height:100%; display:block; overflow:visible; }
+/* Puppet parts transform around their own bounding box. */
+.ccx-pet-body .pp-anim, .ccx-pet-body .pp-tail, .ccx-pet-body .pp-ear-l, .ccx-pet-body .pp-ear-r,
+.ccx-pet-body .pp-eyes-open, .ccx-pet-body .pp-shadow, .ccx-pet-body .pp-paw-l, .ccx-pet-body .pp-paw-r,
+.ccx-pet-body .pp-pawup-l, .ccx-pet-body .pp-pawup-r, .ccx-pet-body .pp-alert, .ccx-pet-body .pp-spark,
+.ccx-pet-body .pp-thought circle, .ccx-pet-body .pp-codeline, .ccx-pet-body .pp-glow, .ccx-pet-body .pp-antenna,
+.ccx-pet-body .pp-pickaxe, .ccx-pet-body .pp-mine-spark { transform-box:fill-box; }
+/* ── idle: breathe, blink, slow tail sway, occasional ear twitch ── */
+.ccx-pet-anim { transform-origin:50% 92%; animation:pp-breathe 3.4s ease-in-out infinite; }
+@keyframes pp-breathe { 0%,100% { transform:translateY(0) scaleY(1) } 50% { transform:translateY(-1px) scaleY(1.02) } }
+.pp-shadow { transform-origin:50% 50%; animation:pp-shadow 3.4s ease-in-out infinite; }
+@keyframes pp-shadow { 0%,100% { transform:scaleX(1); opacity:.9 } 50% { transform:scaleX(.9); opacity:.65 } }
+.pp-tail { transform-origin:10% 85%; animation:pp-tail 3s ease-in-out infinite; }
+@keyframes pp-tail { 0%,100% { transform:rotate(7deg) } 50% { transform:rotate(-9deg) } }
+.pp-ear-l { transform-origin:85% 95%; animation:pp-ear 7s ease-in-out infinite; }
+.pp-ear-r { transform-origin:15% 95%; animation:pp-ear 7s ease-in-out infinite 3.5s; }
+@keyframes pp-ear { 0%,86%,100% { transform:rotate(0deg) } 90% { transform:rotate(-9deg) } 94% { transform:rotate(5deg) } 97% { transform:rotate(-3deg) } }
+.pp-eyes-open { transform-origin:50% 50%; animation:pp-blink 4.6s infinite; }
+@keyframes pp-blink { 0%,91%,100% { transform:scaleY(1) } 94% { transform:scaleY(.12) } 97% { transform:scaleY(1) } }
+/* ── thinking: head tilt, gaze up, pulsing thought dots ── */
+.ccx-pet[data-state="thinking"] .ccx-pet-anim { animation:pp-tilt 2.8s ease-in-out infinite; }
+@keyframes pp-tilt { 0%,100% { transform:rotate(0deg) } 30% { transform:rotate(-3deg) } 70% { transform:rotate(3deg) } }
+.ccx-pet[data-state="thinking"] .pp-tail { animation-duration:2.2s; }
+.pp-thought circle { opacity:0; transform-origin:50% 50%; animation:pp-thought 1.8s ease-in-out infinite; }
+.pp-thought circle:nth-child(2) { animation-delay:.3s; }
+.pp-thought circle:nth-child(3) { animation-delay:.6s; }
+@keyframes pp-thought { 0% { opacity:0; transform:translateY(3px) scale(.6) } 30% { opacity:.95 } 70% { opacity:.85; transform:translateY(-2px) scale(1) } 100% { opacity:0; transform:translateY(-5px) scale(.8) } }
+/* ── working: laptop pops in, paws type, sparks fly, screen glows ── */
+.ccx-pet[data-state="working"] .ccx-pet-anim { animation:pp-bob .6s ease-in-out infinite; }
+@keyframes pp-bob { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-2px) } }
+.ccx-pet[data-state="working"] .pp-tail { animation-duration:.9s; }
+.ccx-pet[data-state="working"] .pp-shadow { animation-duration:.6s; }
+.ccx-pet[data-state="working"] .pp-ear-l, .ccx-pet[data-state="working"] .pp-ear-r { animation-duration:2.4s; }
+.pp-laptop { transform-origin:50% 100%; animation:pp-pop .35s cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes pp-pop { from { transform:scale(0) } to { transform:scale(1) } }
+.pp-paw-l { animation:pp-type .3s ease-in-out infinite alternate; }
+.pp-paw-r { animation:pp-type .3s ease-in-out infinite alternate .3s; }
+@keyframes pp-type { from { transform:translateY(0) } to { transform:translateY(1.8px) } }
+.pp-glow { animation:pp-glow 1.2s ease-in-out infinite; }
+@keyframes pp-glow { 0%,100% { opacity:.35 } 50% { opacity:.9 } }
+.pp-codeline { transform-origin:0% 50%; animation:pp-codeline 1s ease-in-out infinite; }
+.pp-codeline:nth-child(2) { animation-delay:.25s; }
+.pp-codeline:nth-child(3) { animation-delay:.5s; }
+@keyframes pp-codeline { 0%,100% { transform:scaleX(.45) } 50% { transform:scaleX(1) } }
+.pp-spark { opacity:0; transform-origin:50% 50%; animation:pp-spark 1.15s ease-out infinite; }
+.pp-spark:nth-child(2) { animation-delay:.4s; }
+.pp-spark:nth-child(3) { animation-delay:.8s; }
+@keyframes pp-spark { 0% { opacity:0; transform:translateY(3px) scale(.5) } 25% { opacity:1 } 100% { opacity:0; transform:translateY(-10px) scale(1.1) } }
+.pp-antenna { animation:pp-glow 2.4s ease-in-out infinite; }
+.ccx-pet[data-state="working"] .pp-antenna { animation-duration:.7s; }
+/* ── needs: jump with squash & stretch, wave paws, alert badge ── */
+.ccx-pet[data-state="needs"] .ccx-pet-anim { animation:pp-jump .85s cubic-bezier(.3,.7,.4,1) infinite; }
+@keyframes pp-jump { 0%,100% { transform:translateY(0) scale(1,1) } 12% { transform:translateY(1px) scale(1.06,.9) } 40% { transform:translateY(-7px) scale(.96,1.06) } 60% { transform:translateY(-7px) scale(1,1) } 78% { transform:translateY(0) scale(1.04,.94) } 90% { transform:scale(1,1) } }
+.ccx-pet[data-state="needs"] .pp-shadow { animation:pp-shadow-jump .85s ease-in-out infinite; }
+@keyframes pp-shadow-jump { 0%,100% { transform:scaleX(1); opacity:.9 } 40%,60% { transform:scaleX(.65); opacity:.5 } }
+.ccx-pet[data-state="needs"] .pp-tail { animation-duration:.7s; }
+.pp-pawup-l { transform-origin:80% 90%; animation:pp-wave-l .7s ease-in-out infinite; }
+.pp-pawup-r { transform-origin:20% 90%; animation:pp-wave-r .7s ease-in-out infinite .35s; }
+@keyframes pp-wave-l { 0%,100% { transform:rotate(0deg) } 50% { transform:rotate(-16deg) } }
+@keyframes pp-wave-r { 0%,100% { transform:rotate(0deg) } 50% { transform:rotate(16deg) } }
+.pp-alert { transform-origin:50% 100%; animation:pp-alert 1.1s ease-in-out infinite; }
+@keyframes pp-alert { 0%,100% { transform:scale(1) rotate(0deg) } 10% { transform:scale(1.25) } 22% { transform:scale(1) } 50% { transform:rotate(7deg) } 72% { transform:rotate(-7deg) } }
+/* ── skin flavor ── */
+.ccx-pet[data-skin="ghost"][data-state="idle"] .ccx-pet-anim { animation:pp-float 3.2s ease-in-out infinite; }
+@keyframes pp-float { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-4px) } }
+.ccx-pet[data-skin="ghost"] .pp-shadow { animation-duration:3.2s; }
+/* ── depresso (瞅什魔): winds up and swings the pickaxe while working ── */
+.ccx-pet[data-skin="depresso"] .ccx-pet-body { color:#5d84b2; }
+.ccx-pet[data-skin="depresso"][data-state="working"] .ccx-pet-anim,
+.ccx-pet[data-skin="depresso"][data-state="thinking"] .ccx-pet-anim { animation:pp-mine 1.1s ease-in-out infinite; }
+@keyframes pp-mine { 0%,18% { transform:translateY(0) rotate(0deg) } 40% { transform:translateY(-1.5px) rotate(4deg) } 52% { transform:translateY(1.5px) rotate(-6deg) } 62% { transform:translateY(.5px) rotate(-3deg) } 72% { transform:translateY(1px) rotate(-5deg) } 100% { transform:translateY(0) rotate(0deg) } }
+.ccx-pet[data-skin="depresso"][data-state="working"] .pp-shadow,
+.ccx-pet[data-skin="depresso"][data-state="thinking"] .pp-shadow { animation-duration:1.1s; }
+.pp-pickaxe { transform-origin:100% 100%; animation:pp-swing 1.1s infinite; }
+@keyframes pp-swing {
+	0%,18% { transform:rotate(26deg); animation-timing-function:cubic-bezier(.4,0,.6,1) }
+	40% { transform:rotate(40deg); animation-timing-function:cubic-bezier(.7,0,1,1) }
+	52% { transform:rotate(-45deg); animation-timing-function:cubic-bezier(0,.6,.4,1) }
+	60% { transform:rotate(-38deg); animation-timing-function:ease-in-out }
+	70% { transform:rotate(-43deg); animation-timing-function:cubic-bezier(.4,0,.6,1) }
+	100% { transform:rotate(26deg) }
+}
+.pp-mine-spark { opacity:0; transform-origin:50% 50%; animation:pp-mine-spark 1.1s ease-out infinite; }
+.pp-mine-spark:nth-child(2) { animation-delay:.06s; }
+@keyframes pp-mine-spark { 0%,48% { opacity:0; transform:translateY(1px) scale(.4) } 56% { opacity:1; transform:translateY(-2px) scale(1) } 80% { opacity:0; transform:translateY(-8px) scale(.9) } 100% { opacity:0 } }
 .ccx-pet-dots span { animation:ccx-dot 1.2s infinite; }
 .ccx-pet-dots span:nth-child(2) { animation-delay:.2s }
 .ccx-pet-dots span:nth-child(3) { animation-delay:.4s }
 @keyframes ccx-dot { 0%,60%,100% { opacity:.25 } 30% { opacity:1 } }
 .ccx-note { font-size:12px; color:var(--dsw-alias-label-caption); }
-.ccx-refresh { margin-left:auto; }
+.ccx-refresh { position:absolute; top:8px; right:0; height:28px; padding:0 10px; font-size:12px; color:var(--dsw-alias-label-secondary); }
 `;
 		function installStyles() {
 			if (typeof document === "undefined") return () => {};
@@ -362,9 +440,9 @@ html.ccx-wide-chat .ccx-cards-row {
 		//#region helpers
 		function formatTokens(n) {
 			if (!Number.isFinite(n) || n <= 0) return "0";
-			if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
-			if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
-			if (n >= 1e4) return (n / 1e3).toFixed(1) + "K";
+			const unit = (x) => String(Math.round(x * 10) / 10);
+			if (n >= 1e8) return unit(n / 1e8) + "亿";
+			if (n >= 1e4) return unit(n / 1e4) + "万";
 			return String(Math.round(n));
 		}
 		function formatDuration(ms) {
