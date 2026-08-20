@@ -14,7 +14,7 @@
  * automatically: legacy symlinks and the legacy patch row are removed before
  * the new `dsh-code` registration is applied.
  */
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,15 +31,25 @@ function fail(message) {
 	process.exit(1)
 }
 
-/** Locate the dsh installation's node_modules (the npx cache entry holding @deepseek-ai/dsh). */
+/** Locate the dsh installation's node_modules (the npx cache entry holding
+ *  @deepseek-ai/dsh). Multiple cached versions can coexist after upgrades
+ *  (npx keeps one directory per resolved version); prefer the most recently
+ *  installed one so relinking targets the tree you are about to run. */
 function findInstallNodeModules() {
 	if (process.env.DSH_INSTALL_NODE_MODULES) return process.env.DSH_INSTALL_NODE_MODULES
 	const npxRoot = path.join(os.homedir(), '.npm', '_npx')
 	if (existsSync(npxRoot)) {
+		let best = null
 		for (const entry of readdirSync(npxRoot)) {
-			const candidate = path.join(npxRoot, entry, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
-			if (existsSync(candidate)) return path.join(npxRoot, entry, 'node_modules')
+			const pkgJson = path.join(npxRoot, entry, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+			if (!existsSync(pkgJson)) continue
+			let mtimeMs = 0
+			try { mtimeMs = statSync(pkgJson).mtimeMs } catch { /* keep 0 */ }
+			if (best === null || mtimeMs > best.mtimeMs) {
+				best = { mtimeMs, modules: path.join(npxRoot, entry, 'node_modules') }
+			}
 		}
+		if (best !== null) return best.modules
 	}
 	// fall back: resolve upward from a globally installed dsh
 	fail('cannot locate the dsh installation node_modules; set DSH_INSTALL_NODE_MODULES=/path/to/node_modules')

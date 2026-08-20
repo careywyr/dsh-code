@@ -556,11 +556,46 @@
 				id: "codex-mention-chips",
 				order: 11,
 			}, MentionChips)), "dsh-code: mention chips overlay");
+
+			// File preview: session context bridge, right-hand push sidebar, and the
+			// click interceptor that turns file mentions / path-like inline code
+			// into preview opens.
+			ctx.effect(() => ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
+				name: "conversation.input.dock",
+				id: "codex-file-preview-bridge",
+				order: 32,
+			}, SessionFileBridge)), "dsh-code: file preview session bridge");
+			const FilePreviewPanel = makeFilePreviewPanel(ctx);
+			ctx.effect(() => ctx.slots.inject("shell.overlay", () => ctx.slots.register({
+				name: "shell.overlay",
+				id: "codex-file-preview",
+				order: 55,
+			}, FilePreviewPanel)), "dsh-code: file preview panel");
+			const startFilePreviewInterceptor = makeFilePreviewInterceptor();
+			ctx.effect(() => startFilePreviewInterceptor(), "dsh-code: file preview interceptor");
+
+			// File tree sidebar: session context rides the same bridge (above); the
+			// panel renders its own top-right fold toggle aligned with the left
+			// sidebar's toggle, and closes on session switch like the preview.
+			const FileTreePanel = makeFileTreePanel(ctx);
+			ctx.effect(() => ctx.slots.inject("shell.overlay", () => ctx.slots.register({
+				name: "shell.overlay",
+				id: "codex-file-tree",
+				order: 56,
+			}, FileTreePanel)), "dsh-code: file tree sidebar");
 		}
 		//#endregion
 
 		exports.inject = inject;
 		exports.apply = apply;
+		/** Internal hooks for unit tests / debugging. */
+		exports.__filePreview = { store: filePreviewStore };
+		exports.__fileTree = {
+			store: fileTreeStore,
+			buildTree: ftBuildTree,
+			resolveMdImagePath: ccxResolveMdImagePath,
+			rewriteMdImages: ccxRewriteMarkdownImages,
+		};
 		return module.exports;
 	},
 });

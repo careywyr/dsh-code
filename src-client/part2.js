@@ -1,4 +1,529 @@
 
+		//#region FilePreview (right-hand file preview sidebar)
+		const PRIM = require("@deepseek-ai/dsh-client-ui-primitives");
+		const FP_WIDTH_KEY = "dsh-code:file-preview-width:v1";
+		/** Line window rendered for huge files; ReadBlock's banner reports the cut. */
+		const FP_MAX_LINES = 8000;
+
+		/** Extension → highlighter language id (mirrors the platform LANG_ALIASES). */
+		const FP_LANG_BY_EXT = {
+			ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "js", cjs: "js",
+			py: "python", python: "python", rb: "ruby", go: "go", rs: "rust", java: "java",
+			c: "c", h: "c", cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", hh: "cpp",
+			cs: "csharp", kt: "kotlin", kts: "kotlin", swift: "swift", php: "php",
+			yaml: "yaml", yml: "yaml", toml: "toml", ini: "ini",
+			md: "markdown", markdown: "markdown", mdx: "mdx",
+			html: "html", htm: "html", css: "css", scss: "scss", less: "less",
+			sql: "sql", xml: "xml", lua: "lua",
+			sh: "bash", bash: "bash", zsh: "zsh", fish: "shellscript",
+			json: "json", jsonc: "jsonc",
+		};
+		const FP_IMAGE_MIME = {
+			png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+			webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml", avif: "image/avif",
+		};
+		const FP_MARKDOWN_EXTS = new Set(["md", "mdx", "markdown", "mdown", "mkd"]);
+		/** Extensions accepted when an inline-code token has no path separator. */
+		const FP_KNOWN_EXTS = new Set([
+			...Object.keys(FP_LANG_BY_EXT), ...Object.keys(FP_IMAGE_MIME),
+			...FP_MARKDOWN_EXTS, "txt", "text", "log", "csv", "tsv", "lock", "patch", "diff",
+		]);
+		function fpExt(p) {
+			const name = baseName(String(p || ""));
+			const dot = name.lastIndexOf(".");
+			return dot <= 0 ? "" : name.slice(dot + 1).toLowerCase();
+		}
+		function fpIsImage(p) { return FP_IMAGE_MIME[fpExt(p)] !== undefined; }
+		function fpIsMarkdown(p) { return FP_MARKDOWN_EXTS.has(fpExt(p)); }
+		function fpLang(p) { return FP_LANG_BY_EXT[fpExt(p)]; }
+		function fpFormatBytes(n) {
+			if (!Number.isFinite(n) || n < 0) return "";
+			if (n < 1024) return n + " B";
+			if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+			return (n / 1024 / 1024).toFixed(2) + " MB";
+		}
+		function fpCleanPath(raw) {
+			return String(raw ?? "").trim().replace(/^[\s"'`(【\[]+/, "").replace(/[\s"'`）),;:。.]+$/, "");
+		}
+		/** Heuristic gate for inline-code tokens that should behave as file links. */
+		function fpPathLooksReal(raw) {
+			const text = fpCleanPath(raw);
+			if (text.length < 3 || text.length > 240) return false;
+			if (/\s/.test(text) || text.includes("`") || text.includes("://")) return false;
+			const hasSep = text.includes("/") || text.startsWith("~");
+			const extOk = FP_KNOWN_EXTS.has(fpExt(text));
+			if (!hasSep && !extOk) return false;
+			// Bare two-segment fragments like "and/or" are prose, not paths.
+			if (!extOk && !text.startsWith("/") && !text.startsWith("~") && !text.startsWith(".") && text.length <= 6) return false;
+			return true;
+		}
+		function fpJoin(base, rel) {
+			const b = String(base ?? "").replace(/[/\\]+$/, "");
+			const r = String(rel ?? "").replace(/^[/\\]+/, "");
+			if (b === "") return r;
+			if (r === "") return b;
+			return b + "/" + r;
+		}
+
+		/** Module-level preview state shared by the git card, the click
+		 *  interceptor and the sidebar panel. */
+		const filePreviewStore = {
+			state: { open: false, path: "", sessionId: undefined, cwd: "", nonce: 0 },
+			listeners: new Set(),
+			get() { return this.state; },
+			subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+			emit() { for (const fn of [...this.listeners]) { try { fn(); } catch { /* listener error */ } } },
+			open(path) {
+				const cleaned = fpCleanPath(path);
+				if (cleaned === "") return;
+				// One right-hand panel at a time: the file-tree sidebar yields.
+				try { fileTreeStore.close(); } catch { /* tree region not loaded */ }
+				this.state = { ...this.state, open: true, path: cleaned, nonce: this.state.nonce + 1 };
+				this.emit();
+			},
+			close() {
+				if (!this.state.open) return;
+				this.state = { ...this.state, open: false };
+				this.emit();
+			},
+			setSession(sessionId, cwd) {
+				if (this.state.sessionId === sessionId && this.state.cwd === cwd) return;
+				// The preview is session-bound: leaving for another session closes it.
+				const switchingAway = this.state.open && this.state.sessionId !== undefined && sessionId !== this.state.sessionId;
+				this.state = { ...this.state, sessionId, cwd, open: switchingAway ? false : this.state.open };
+				this.emit();
+			},
+		};
+
+		/** Session-scoped bridge: keeps the module stores aware of the active
+		 *  session's workspace so relative paths resolve server-side. Both
+		 *  right-hand panels are session-bound: switching sessions closes them. */
+		function SessionFileBridge(props) {
+			const sessionId = props.sessionId;
+			const cwd = props.useSession((s) => s.cwd) || "";
+			useEffect(() => {
+				filePreviewStore.setSession(sessionId, cwd);
+				fileTreeStore.setSession(sessionId, cwd);
+			}, [sessionId, cwd]);
+			return null;
+		}
+
+		/** Global click interception: produced-file chips, native file-mention
+		 *  buttons and path-like inline code tokens open the sidebar instead of
+		 *  the OS handler. Full paths ride the `title` attribute on the chip /
+		 *  mention buttons (their visible text is only the basename). */
+		function makeFilePreviewInterceptor() {
+			return function startFilePreviewInterceptor() {
+				const intercept = (event, pathText) => {
+					event.preventDefault();
+					event.stopPropagation();
+					filePreviewStore.open(pathText);
+				};
+				const onClick = (event) => {
+					if (event.button !== 0 || event.defaultPrevented) return;
+					const target = event.target instanceof Element ? event.target : null;
+					if (target === null) return;
+					const btn = target.closest("button");
+					if (btn !== null) {
+						// a) Turn-tail produced-file chips: buttons inside the
+						//    [data-produced-files-row] container.
+						// b) Inline markdown file-mention buttons (hashed
+						//    *fileMention* class from the platform renderer).
+						// c) Tool-row file links inside chat tool cards (hashed
+						//    *fileLink* class; visible text is the path, already
+						//    relativized to the session workspace).
+						const isChip = btn.closest("[data-produced-files-row]") !== null;
+						const cls = !isChip && typeof btn.className === "string" ? btn.className : "";
+						const isFileButton = isChip || cls.indexOf("fileMention") !== -1 || cls.indexOf("fileLink") !== -1;
+						if (isFileButton) {
+							const pathText = fpCleanPath(btn.getAttribute("title") || btn.textContent);
+							if (pathText !== "") intercept(event, pathText);
+						}
+						return;
+					}
+					// c) Inline code tokens that look like paths.
+					const code = target.closest("code");
+					if (code === null || code.closest("pre") !== null) return;
+					if (code.querySelector("button") !== null) return;
+					if (code.closest("[data-phase]") === null) return;
+					const pathText = fpCleanPath(code.textContent);
+					if (pathText === "" || !fpPathLooksReal(pathText)) return;
+					intercept(event, pathText);
+				};
+				const onOver = (event) => {
+					const target = event.target instanceof Element ? event.target : null;
+					if (target === null || typeof target.closest !== "function") return;
+					const code = target.closest("code");
+					if (code === null || code.closest("pre") !== null || code.closest("[data-phase]") === null) return;
+					if (fpPathLooksReal(code.textContent)) {
+						code.classList.add("ccx-filehint");
+						document.documentElement.classList.add("ccx-fp-hints");
+					}
+				};
+				const onOut = (event) => {
+					const target = event.target instanceof Element ? event.target : null;
+					if (target === null || typeof target.closest !== "function") return;
+					const code = target.closest("code");
+					if (code !== null) code.classList.remove("ccx-filehint");
+				};
+				const onKey = (event) => {
+					if (event.key === "Escape" && filePreviewStore.get().open) filePreviewStore.close();
+				};
+				document.addEventListener("click", onClick, true);
+				document.addEventListener("mouseover", onOver);
+				document.addEventListener("mouseout", onOut);
+				document.addEventListener("keydown", onKey);
+				return () => {
+					document.removeEventListener("click", onClick, true);
+					document.removeEventListener("mouseover", onOver);
+					document.removeEventListener("mouseout", onOut);
+					document.removeEventListener("keydown", onKey);
+				};
+			};
+		}
+
+		/** The right-hand panels need the theme's SOLID base color — the same
+		 *  surface the chat page shows. Wallpaper mode overrides
+		 *  `--dsw-alias-bg-base` with a translucent layer and forces body
+		 *  transparent, so reading the live token/computed style would give
+		 *  glass instead of a readable surface. Resolve the active theme's own
+		 *  registered token (pre-override) from the theme snapshot; fall back
+		 *  to the built-in static palette, then to the computed body color. */
+		function ccxSamplePageBg(ctx) {
+			try {
+				const snap = ctx !== undefined && ctx.theme !== undefined && typeof ctx.theme.getTheme === "function" ? ctx.theme.getTheme() : undefined;
+				const active = snap?.active;
+				const registered = Array.isArray(snap?.themes) && active !== undefined
+					? snap.themes.find((t) => t.id === active.id)
+					: undefined;
+				let token = registered?.tokens?.["--dsw-alias-bg-base"];
+				if (token !== undefined && typeof token === "object" && token !== null) {
+					token = active?.colorScheme === "light" ? token.light : token.dark;
+				}
+				if (typeof token === "string" && token !== "") return token;
+				// Built-in light/dark themes register no tokens: use the static palette.
+				if (active !== undefined) {
+					const staticToken = active.colorScheme === "dark" ? "--dsw-static-neutral-bluish-950" : "--dsw-static-neutral-bluish-00";
+					const v = getComputedStyle(document.body).getPropertyValue(staticToken).trim();
+					if (v !== "") return v;
+				}
+			} catch { /* fall through */ }
+			try {
+				const bg = getComputedStyle(document.body).backgroundColor;
+				if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") return bg;
+			} catch { /* no background info */ }
+			return "";
+		}
+
+		/** Resolve a markdown image target against the md file's own directory.
+		 *  Returns the path to request from /__codex/raw (workspace-relative, or an
+		 *  absolute path that stays inside the workspace server-side), or null
+		 *  when the target must be left untouched (http/data URIs, ~ shortcuts). */
+		function ccxResolveMdImagePath(mdPath, imgSrc) {
+			const src = String(imgSrc ?? "").trim();
+			if (src === "") return null;
+			if (/^([a-z][a-z0-9+.-]*:|\/\/|~)/i.test(src)) return null;
+			// Anchors / query fragments mean nothing to the filesystem.
+			const clean = src.split(/[?#]/)[0];
+			if (clean === "") return null;
+			// Workspace-root-absolute targets resolve against the workspace itself.
+			if (clean.startsWith("/")) return clean;
+			const md = String(mdPath ?? "");
+			const cut = md.lastIndexOf("/");
+			const dir = cut === -1 ? "" : md.slice(0, cut);
+			const segments = dir === "" ? [] : dir.split("/");
+			for (const seg of clean.split("/")) {
+				if (seg === "" || seg === ".") continue;
+				if (seg === "..") { if (segments.length > 0) segments.pop(); continue; }
+				segments.push(seg);
+			}
+			return segments.join("/");
+		}
+
+		/** Rewrite relative image URLs in markdown source into absolute
+		 *  <origin>/__codex/raw URLs. The platform renderer only accepts full
+		 *  http(s) URLs for images — every other form degrades to bare alt text —
+		 *  so workspace images only show up once rewritten. Handles inline
+		 *  `![alt](src "title")` (with the `<spaced target>` form) plus
+		 *  `[label]: target` reference definitions; fenced code blocks keep their
+		 *  literal text. */
+		function ccxRewriteMarkdownImages(text, mdPath, cwd, sessionId) {
+			const rewriteTarget = (target) => {
+				const rel = ccxResolveMdImagePath(mdPath, target);
+				if (rel === null || rel === "") return String(target ?? "");
+				const params = new URLSearchParams();
+				params.set("path", rel);
+				if (cwd !== "") params.set("cwd", cwd);
+				else if (sessionId !== undefined) params.set("session", String(sessionId));
+				const origin = typeof location !== "undefined" && typeof location.origin === "string" ? location.origin : "";
+				return origin + "/__codex/raw?" + params.toString();
+			};
+			const rewriteInline = (line) => line.replace(
+				/(!\[[^\]]*\]\()\s*(?:<([^>]*)>|([^)\s]+))(\s+(?:"[^"]*"|'[^']*'))?\s*(\))/g,
+				(m, open, bracketed, bare, title, close) => open + rewriteTarget(bracketed !== undefined ? bracketed : bare) + (title ?? "") + close,
+			);
+			const rewriteDefs = (line) => line.replace(
+				/^(\s{0,3}\[[^\]]+\]:\s*)(?:<([^>]*)>|(\S+))(\s+.*)?$/,
+				(m, label, bracketed, bare, rest) => label + rewriteTarget(bracketed !== undefined ? bracketed : bare) + (rest ?? ""),
+			);
+			const lines = String(text ?? "").split("\n");
+			let inFence = false;
+			let fenceMark = "";
+			for (let i = 0; i < lines.length; i += 1) {
+				const fence = lines[i].match(/^\s{0,3}(`{3,}|~{3,})/);
+				if (fence !== null) {
+					if (!inFence) { inFence = true; fenceMark = fence[1].slice(0, 3); }
+					else if (fence[1].startsWith(fenceMark)) { inFence = false; fenceMark = ""; }
+					continue;
+				}
+				if (inFence) continue;
+				lines[i] = rewriteDefs(rewriteInline(lines[i]));
+			}
+			return lines.join("\n");
+		}
+
+		/** The right-hand push panel. Renders file content by type: markdown via
+		 *  the platform renderer, code via the line-numbered ReadBlock, images
+		 *  inline, directories as a shallow listing. */
+		function makeFilePreviewPanel(ctx) {
+			const MarkdownText = PRIM.MarkdownText;
+			const ReadBlock = PRIM.ReadBlock;
+			const writeClipboard = PRIM.writeClipboard;
+			const samplePageBg = () => ccxSamplePageBg(ctx);
+
+			function fpStatusPanel(icon, title, detail) {
+				return h("div", { className: "ccx-fp-status" },
+					h("span", { className: "ccx-fp-status-icon" }, icon),
+					h("span", null, title),
+					detail !== undefined && detail !== null ? detail : null,
+				);
+			}
+			function fpReadBlock(label, content, lang) {
+				const all = String(content).split("\n");
+				if (all.length > 0 && all[all.length - 1] === "") all.pop();
+				const totalLines = all.length;
+				const lines = all.slice(0, FP_MAX_LINES).map((text, i) => ({ number: i + 1, text }));
+				return h(ReadBlock, {
+					label,
+					lines,
+					totalLines,
+					lang,
+					maxLines: Math.max(lines.length, 1),
+					className: "ccx-fp-read",
+				});
+			}
+			function fpRenderBody(data, view, session) {
+				const body = data.body;
+				if (body.kind === "dir") {
+					const items = (body.entries ?? []).map((entry) => h("div", {
+						key: entry.type + ":" + entry.name,
+						className: "ccx-fp-dir-item",
+						title: "点击打开 " + entry.name,
+						onClick: () => filePreviewStore.open(fpJoin(body.path, entry.name)),
+					},
+						h("span", { className: "ccx-fp-dir-type" }, entry.type === "dir" ? "📁" : "📄"),
+						h("span", null, entry.name + (entry.type === "dir" ? "/" : "")),
+					));
+					return {
+						flush: false,
+						node: h(React.Fragment, null,
+							h("div", { className: "ccx-meta", style: { marginBottom: "10px" } }, "目录 · " + body.count + " 项"),
+							h("div", { className: "ccx-fp-dir" }, items.length > 0 ? items : "（空目录）")),
+					};
+				}
+				if (body.tooLarge === true) {
+					return { flush: false, node: fpStatusPanel("📦", "文件过大（" + fpFormatBytes(body.size) + "）", "超出预览上限，暂不提供内容渲染。") };
+				}
+				if (body.image === true && body.encoding === "base64") {
+					const mime = FP_IMAGE_MIME[fpExt(body.path)] ?? "image/png";
+					return {
+						flush: false,
+						node: h("div", { className: "ccx-fp-img-wrap" },
+							h("img", { className: "ccx-fp-img", src: "data:" + mime + ";base64," + body.content, alt: baseName(body.path) })),
+					};
+				}
+				if (body.binary === true) {
+					return { flush: false, node: fpStatusPanel("🧩", "二进制文件（" + fpFormatBytes(body.size) + "）", "内容无法以文本形式预览。") };
+				}
+				let content = String(body.content ?? "");
+				const ext = fpExt(body.path);
+				if (ext === "json" || ext === "jsonc") {
+					try { content = JSON.stringify(JSON.parse(content), null, 2); } catch { /* keep raw */ }
+				}
+				if (fpIsMarkdown(body.path) && view === "rendered" && MarkdownText !== undefined) {
+					// Workspace-relative image targets must become absolute
+					// /__codex/raw URLs or the renderer degrades them to alt text.
+					const rewritten = ccxRewriteMarkdownImages(content, body.path, session?.cwd ?? "", session?.sessionId);
+					return { flush: false, node: h(MarkdownText, { text: rewritten }) };
+				}
+				if (ReadBlock === undefined) {
+					return { flush: false, node: h("pre", { style: { whiteSpace: "pre-wrap", fontSize: "12px" } }, content) };
+				}
+				const lang = fpIsMarkdown(body.path) ? "markdown" : fpLang(body.path);
+				return { flush: true, node: fpReadBlock(body.path, content, lang) };
+			}
+
+			return function FilePreviewPanel() {
+				const state = useSyncExternalStore(
+					(fn) => filePreviewStore.subscribe(fn),
+					() => filePreviewStore.get(),
+					() => filePreviewStore.get(),
+				);
+				const [width, setWidth] = useState(() => {
+					try {
+						const saved = Number(JSON.parse(localStorage.getItem(FP_WIDTH_KEY) ?? "null"));
+						if (Number.isFinite(saved) && saved >= 360 && saved <= 1200) return saved;
+					} catch { /* storage unavailable */ }
+					return 540;
+				});
+				const [view, setView] = useState("rendered");
+				const [data, setData] = useState(null);
+				const [copied, setCopied] = useState(false);
+				const [panelBg, setPanelBg] = useState(() => samplePageBg());
+				const widthRef = useRef(width);
+				widthRef.current = width;
+
+				// Push the shell left while open; clean up on close/unmount.
+				useEffect(() => {
+					const html = document.documentElement;
+					if (state.open) html.classList.add("ccx-fp-open");
+					else html.classList.remove("ccx-fp-open");
+					return () => { html.classList.remove("ccx-fp-open"); };
+				}, [state.open]);
+				// Panel width variable (updated live while dragging).
+				useEffect(() => {
+					const html = document.documentElement;
+					if (!state.open) return undefined;
+					html.style.setProperty("--ccx-fp-w", width + "px");
+					return () => { html.style.removeProperty("--ccx-fp-w"); };
+				}, [state.open, width]);
+				// Match the panel background to the chat page's actual painted color.
+				useEffect(() => {
+					if (!state.open) return undefined;
+					const update = () => setPanelBg(samplePageBg());
+					update();
+					const off = ctx !== undefined && typeof ctx.on === "function" ? ctx.on("theme/change", update) : null;
+					return () => { if (off) off(); };
+				}, [state.open]);
+				// Fresh view mode per file.
+				useEffect(() => { setView("rendered"); setCopied(false); }, [state.path, state.nonce]);
+				// Load content.
+				useEffect(() => {
+					if (!state.open) return undefined;
+					let alive = true;
+					setData({ status: "loading" });
+					const params = new URLSearchParams();
+					params.set("path", state.path);
+					if (state.cwd !== "") params.set("cwd", state.cwd);
+					else if (state.sessionId !== undefined) params.set("session", String(state.sessionId));
+					fetch("/__codex/file?" + params.toString()).then(async (res) => {
+						const ctype = res.headers.get("content-type") ?? "";
+						if (!ctype.includes("application/json")) {
+							if (alive) setData({ status: "error", kind: res.status === 404 ? "route" : "http", code: res.status });
+							return;
+						}
+						const body = await res.json();
+						if (!alive) return;
+						if (!res.ok || body.error !== undefined) {
+							// "unknown codex-clone route" = the host half predates the
+							// /__codex/file route and needs one dsh web restart.
+							const kind = body.error === "unknown codex-clone route" ? "route"
+								: body.error === "no such file" ? "missing" : "other";
+							setData({ status: "error", kind, message: body.error, resolved: body.path });
+							return;
+						}
+						setData({ status: "ok", body });
+					}).catch((error) => {
+						if (alive) setData({ status: "error", kind: "network", message: String(error?.message ?? error) });
+					});
+					return () => { alive = false; };
+				}, [state.open, state.path, state.nonce, state.cwd, state.sessionId]);
+
+				if (!state.open) return null;
+
+				const onResizeStart = (event) => {
+					event.preventDefault();
+					const startX = event.clientX;
+					const startW = widthRef.current;
+					document.body.style.cursor = "col-resize";
+					document.documentElement.classList.add("ccx-fp-resizing");
+					const onMove = (ev) => {
+						const next = Math.max(360, Math.min(Math.round(window.innerWidth * 0.82), startW + (startX - ev.clientX)));
+						setWidth(next);
+					};
+					const onUp = () => {
+						document.body.style.cursor = "";
+						document.documentElement.classList.remove("ccx-fp-resizing");
+						document.removeEventListener("mousemove", onMove);
+						document.removeEventListener("mouseup", onUp);
+						try { localStorage.setItem(FP_WIDTH_KEY, JSON.stringify(widthRef.current)); } catch { /* quota */ }
+					};
+					document.addEventListener("mousemove", onMove);
+					document.addEventListener("mouseup", onUp);
+				};
+				const displayPath = data?.status === "ok" ? data.body.path : state.path;
+				const isMarkdownFile = data?.status === "ok" && data.body.kind === "file" && fpIsMarkdown(data.body.path);
+				const sizeInfo = data?.status === "ok" && typeof data.body.size === "number" ? " · " + fpFormatBytes(data.body.size) : "";
+				const onCopyPath = () => {
+					if (copied) return;
+					const doCopy = writeClipboard !== undefined
+						? writeClipboard(displayPath)
+						: (navigator.clipboard?.writeText(displayPath).then(() => true).catch(() => false) ?? Promise.resolve(false));
+					doCopy.then((ok) => {
+						if (!ok) return;
+						setCopied(true);
+						window.setTimeout(() => setCopied(false), 1200);
+					});
+				};
+
+				let bodyNode;
+				let flush = false;
+				if (data === null || data.status === "loading") {
+					bodyNode = fpStatusPanel("⏳", "正在加载…", h("code", null, state.path));
+				} else if (data.status === "error") {
+					if (data.kind === "route") {
+						bodyNode = fpStatusPanel("🔌", "文件预览服务未就绪",
+							h(React.Fragment, null,
+								h("span", null, "宿主路由 /__codex/file 尚未加载。"),
+								h("span", null, "重启一次 dsh web 服务即可启用内容预览。")));
+					} else if (data.kind === "missing") {
+						bodyNode = fpStatusPanel("🫥", "文件不存在或已被删除", h("code", null, data.resolved ?? state.path));
+					} else {
+						bodyNode = fpStatusPanel("⚠️", "加载失败", h("code", null, data.message ?? ("HTTP " + (data.code ?? ""))));
+					}
+				} else {
+					const rendered = fpRenderBody(data, view, { cwd: state.cwd, sessionId: state.sessionId });
+					bodyNode = rendered.node;
+					flush = rendered.flush;
+				}
+
+				return h("aside", {
+					className: "ccx-fp",
+					role: "complementary",
+					"aria-label": "文件预览",
+					style: panelBg !== ""
+						? { background: panelBg, "--ccx-fp-bg": panelBg }
+						: undefined,
+				},
+					h("div", { className: "ccx-fp-resize", onMouseDown: onResizeStart, title: "拖动调整宽度" }),
+					h("div", { className: "ccx-fp-head" },
+						h("span", { className: "ccx-fp-icon" }, mentionIconReact("file")),
+						h("div", { className: "ccx-fp-title" },
+							h("span", { className: "ccx-fp-name" }, baseName(displayPath) || displayPath),
+							h("span", { className: "ccx-fp-path" }, displayPath + sizeInfo)),
+						h("div", { className: "ccx-fp-actions" },
+							isMarkdownFile ? h("div", { className: "ccx-fp-seg" },
+								h("button", { type: "button", className: view === "rendered" ? "on" : "", onClick: () => setView("rendered") }, "渲染"),
+								h("button", { type: "button", className: view === "source" ? "on" : "", onClick: () => setView("source") }, "源码"),
+							) : null,
+							h("button", { type: "button", className: "ccx-fp-btn", onClick: onCopyPath }, copied ? "已复制" : "复制路径"),
+							h("button", { type: "button", className: "ccx-fp-btn", title: "关闭（Esc）", onClick: () => filePreviewStore.close() }, "✕"))),
+					h("div", { className: "ccx-fp-body" + (flush ? " flush" : "") }, bodyNode),
+				);
+			};
+		}
+		//#endregion
+
 		//#region GitCard
 		function makeGitCard(ctx) {
 			return function GitCard(props) {
@@ -120,11 +645,23 @@
 							"工作区变更 · " + totalFiles + " 个文件 · +" + stats.added + " −" + stats.deleted + (stats.untracked > 0 ? " · " + stats.untracked + " 未跟踪" : "")),
 						stats.files.length === 0 && stats.untracked === 0
 							? h("div", { className: "ccx-git-empty" }, "没有已跟踪的变更。")
-							: stats.files.map((f) => h("div", { key: f.file, className: "ccx-git-file", title: f.file },
+							: stats.files.map((f) => h("div", {
+								key: f.file,
+								className: "ccx-git-file clickable",
+								title: f.file + " · 点击预览",
+								onClick: () => filePreviewStore.open(fpJoin(cwd, f.file)),
+							},
 								h("span", { className: "ccx-git-file-path" }, f.file),
-								h("span", { className: "ccx-git-add" }, "+" + f.added),
-								h("span", { className: "ccx-git-del" }, "−" + f.deleted))),
-						stats.untracked > 0 ? h("div", { className: "ccx-git-empty" }, "另有 " + stats.untracked + " 个未跟踪文件。") : null,
+								f.untracked === true
+									? h("span", { className: "ccx-git-untracked" }, "未跟踪")
+									: h(React.Fragment, null,
+										h("span", { className: "ccx-git-add" }, "+" + f.added),
+										h("span", { className: "ccx-git-del" }, "−" + f.deleted)))),
+						(() => {
+							const listedUntracked = stats.files.filter((f) => f.untracked === true).length;
+							const rest = stats.untracked - listedUntracked;
+							return rest > 0 ? h("div", { className: "ccx-git-empty" }, "另有 " + rest + " 个未跟踪文件。") : null;
+						})(),
 					) : null,
 				);
 			};
@@ -1529,5 +2066,829 @@
 				),
 				...parts,
 			);
+		}
+		//#endregion
+
+		//#region FileTree (Codex-style right dock: file tree + tabbed editors)
+		const FT_WIDTH_KEY = "dsh-code:file-tree-width:v1";
+		const FT_EDITOR_WIDTH_KEY = "dsh-code:file-editor-width:v1";
+		/** The left sidebar's fold toggle, used to align the right toggle's height. */
+		const FT_LEFT_TOGGLE_SELECTOR = [
+			'[aria-label="收起侧边栏"]',
+			'[aria-label="打开侧边栏"]',
+			'[aria-label="Collapse sidebar"]',
+			'[aria-label="Open sidebar"]',
+		].join(",");
+		/** Restart-hint markers returned while the host half predates a route. */
+		const FT_ROUTE_HINTS = new Set(["unknown codex-clone route", "missing path"]);
+
+		/** Module-level dock state shared by the toggle button, the session bridge
+		 *  and the dock panel. Session-bound like the preview: switching sessions
+		 *  closes the dock and forgets its open tabs. The tree pane stays pinned to
+		 *  the far right; every opened file gets a tab in the editor pane to its
+		 *  left, and tabs survive sidebar close/reopen within the same session. */
+		const fileTreeStore = {
+			state: { open: false, sessionId: undefined, cwd: "", tabs: [], active: "", nonce: 0 },
+			listeners: new Set(),
+			get() { return this.state; },
+			subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+			emit() { for (const fn of [...this.listeners]) { try { fn(); } catch { /* listener error */ } } },
+			open() {
+				if (this.state.open) return;
+				// One right-hand surface at a time: the preview sidebar yields.
+				try { filePreviewStore.close(); } catch { /* preview region not loaded */ }
+				this.state = { ...this.state, open: true };
+				this.emit();
+			},
+			close() {
+				if (!this.state.open) return;
+				this.state = { ...this.state, open: false };
+				this.emit();
+			},
+			toggle() { if (this.state.open) this.close(); else this.open(); },
+			/** Open a file tab (or activate it when it is already open). */
+			openFile(path) {
+				if (typeof path !== "string" || path === "") return;
+				try { filePreviewStore.close(); } catch { /* preview region not loaded */ }
+				const tabs = this.state.tabs.includes(path) ? this.state.tabs : [...this.state.tabs, path];
+				this.state = { ...this.state, open: true, tabs, active: path, nonce: this.state.nonce + 1 };
+				this.emit();
+			},
+			setActive(path) {
+				if (path === this.state.active || !this.state.tabs.includes(path)) return;
+				this.state = { ...this.state, active: path };
+				this.emit();
+			},
+			/** Close one tab; the neighbour takes over when it was the active one. */
+			closeFile(path) {
+				const idx = this.state.tabs.indexOf(path);
+				if (idx === -1) return;
+				const tabs = this.state.tabs.filter((t) => t !== path);
+				let active = this.state.active;
+				if (active === path) active = tabs.length === 0 ? "" : tabs[Math.min(idx, tabs.length - 1)];
+				this.state = { ...this.state, tabs, active, nonce: this.state.nonce + 1 };
+				this.emit();
+			},
+			setSession(sessionId, cwd) {
+				if (this.state.sessionId === sessionId && this.state.cwd === cwd) return;
+				// The dock is session-bound: leaving for another session closes it.
+				const switchingAway = this.state.open && this.state.sessionId !== undefined && sessionId !== this.state.sessionId;
+				this.state = {
+					...this.state,
+					sessionId,
+					cwd,
+					open: switchingAway ? false : this.state.open,
+					tabs: switchingAway ? [] : this.state.tabs,
+					active: switchingAway ? "" : this.state.active,
+				};
+				this.emit();
+			},
+		};
+
+		/** Build a nested tree from the flat workspace listing. Missing
+		 *  intermediate directories (shouldn't happen) are materialised so every
+		 *  file still hangs off some parent. Children sort dirs-first, then by name. */
+		function ftBuildTree(entries) {
+			const root = { name: "", rel: "", type: "dir", children: [] };
+			const byRel = new Map();
+			byRel.set("", root);
+			const ensureDir = (rel) => {
+				const known = byRel.get(rel);
+				if (known !== undefined) return known;
+				const cut = rel.lastIndexOf("/");
+				const parentRel = cut === -1 ? "" : rel.slice(0, cut);
+				const parent = ensureDir(parentRel);
+				const node = { name: cut === -1 ? rel : rel.slice(cut + 1), rel, type: "dir", children: [] };
+				parent.children.push(node);
+				byRel.set(rel, node);
+				return node;
+			};
+			for (const e of entries) {
+				if (e === null || e === undefined || typeof e.rel !== "string" || e.rel === "") continue;
+				if (byRel.has(e.rel)) continue; // already materialised as an intermediate dir
+				const cut = e.rel.lastIndexOf("/");
+				const parent = ensureDir(cut === -1 ? "" : e.rel.slice(0, cut));
+				const node = { name: e.name, rel: e.rel, type: e.type === "dir" ? "dir" : "file", children: e.type === "dir" ? [] : undefined };
+				parent.children.push(node);
+				if (node.type === "dir") byRel.set(e.rel, node);
+			}
+			const sortRec = (node) => {
+				if (node.children === undefined) return;
+				node.children.sort((a, b) => (a.type === b.type ? (a.name < b.name ? -1 : 1) : a.type === "dir" ? -1 : 1));
+				for (const child of node.children) sortRec(child);
+			};
+			sortRec(root);
+			return root;
+		}
+
+		/** "Panel on the right" glyph mirroring the left sidebar's panel icon. */
+		function ftPanelIcon() {
+			return h("svg", {
+				width: 16, height: 16, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor",
+				strokeWidth: "1.3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true,
+			},
+				h("rect", { x: "1.5", y: "2.5", width: "13", height: "11", rx: "2" }),
+				h("line", { x1: "10.5", y1: "2.5", x2: "10.5", y2: "13.5" }),
+			);
+		}
+
+		function makeFileTreePanel(ctx) {
+			const MarkdownText = PRIM.MarkdownText;
+			const ReadBlock = PRIM.ReadBlock;
+			const writeClipboard = PRIM.writeClipboard;
+			const samplePageBg = () => ccxSamplePageBg(ctx);
+
+			function ftStatusPanel(icon, title, detail) {
+				return h("div", { className: "ccx-ft-status" },
+					h("span", { className: "ccx-ft-status-icon" }, icon),
+					h("span", null, title),
+					detail !== undefined && detail !== null ? detail : null,
+				);
+			}
+
+			/** Track the left sidebar's fold toggle so the right toggle sits at the
+			 *  exact same height in both of the left sidebar's states. */
+			function useLeftToggleTop() {
+				const [top, setTop] = useState(22);
+				useEffect(() => {
+					let timer = null;
+					let tries = 0;
+					let raf = 0;
+					const measure = () => {
+						const el = document.querySelector(FT_LEFT_TOGGLE_SELECTOR);
+						if (el === null) return false;
+						const rect = el.getBoundingClientRect();
+						if (rect.height <= 0) return false;
+						setTop((prev) => (Math.abs(prev - rect.top) < 0.5 ? prev : rect.top));
+						return true;
+					};
+					const tick = () => {
+						if (measure()) return;
+						if (++tries < 60) timer = setTimeout(tick, 100);
+					};
+					tick();
+					const scheduleMeasure = () => {
+						if (raf !== 0) return;
+						raf = requestAnimationFrame(() => { raf = 0; measure(); });
+					};
+					// The left toggle moves when the left sidebar folds/unfolds.
+					const rootEl = document.getElementById("root");
+					const observer = rootEl !== null ? new MutationObserver(scheduleMeasure) : null;
+					if (observer !== null) observer.observe(rootEl, { attributes: true, attributeFilter: ["class", "style"], subtree: true });
+					window.addEventListener("resize", scheduleMeasure);
+					return () => {
+						if (timer !== null) clearTimeout(timer);
+						if (raf !== 0) cancelAnimationFrame(raf);
+						if (observer !== null) observer.disconnect();
+						window.removeEventListener("resize", scheduleMeasure);
+					};
+				}, []);
+				return top;
+			}
+
+			/** Overlay code editor: a transparent <textarea> layered exactly over the
+			 *  syntax-highlighted ReadBlock, so editing keeps the platform's colors
+			 *  and line numbers. The backdrop's glyph metrics (font, line height,
+			 *  gutter offset) are measured from the rendered ReadBlock and copied to
+			 *  the textarea so both layers overlap character-for-character. */
+			function FtCodeEditor(props) {
+				const draft = props.draft;
+				const lang = props.lang;
+				const taRef = useRef(null);
+				const backRef = useRef(null);
+				const [metrics, setMetrics] = useState(null);
+				// The backdrop highlight trails the draft by a short debounce so fast
+				// typing never waits on the tokenizer.
+				const [backDraft, setBackDraft] = useState(draft);
+				useEffect(() => {
+					if (draft === backDraft) return undefined;
+					const timer = setTimeout(() => setBackDraft(draft), 120);
+					return () => clearTimeout(timer);
+				}, [draft, backDraft]);
+
+				// Measure the backdrop's glyph metrics once its lines are rendered
+				// (re-runs when the highlighted content or language changes).
+				useEffect(() => {
+					const measure = () => {
+						const back = backRef.current;
+						if (back === null) return;
+						const block = back.querySelector("[data-read]");
+						if (block === null) return;
+						const body = block.querySelector(":scope > div:last-child");
+						if (body === null) return;
+						const lineEls = body.querySelectorAll(":scope > div");
+						if (lineEls.length === 0) return;
+						const first = lineEls[0];
+						const content = first.lastElementChild;
+						if (content === null) return;
+						// All offsets are relative to the backdrop element: the textarea
+						// layer shares that exact box (both inset:0 siblings), and this
+						// also folds in any block margin/border the platform applies.
+						const backRect = back.getBoundingClientRect();
+						const firstRect = first.getBoundingClientRect();
+						const contentRect = content.getBoundingClientRect();
+						if (firstRect.height <= 0) return;
+						// Line pitch from two consecutive lines when available (captures
+						// margins/gaps a single line's height would miss).
+						const pitch = lineEls.length > 1
+							? lineEls[1].getBoundingClientRect().top - firstRect.top
+							: firstRect.height;
+						const cs = getComputedStyle(content);
+						setMetrics({
+							padLeft: Math.max(0, contentRect.left - backRect.left),
+							padTop: Math.max(0, firstRect.top - backRect.top),
+							lineHeight: pitch > 0 ? pitch : firstRect.height,
+							fontFamily: cs.fontFamily,
+							fontSize: cs.fontSize,
+							letterSpacing: cs.letterSpacing,
+							tabSize: cs.tabSize,
+						});
+					};
+					measure();
+					window.addEventListener("resize", measure);
+					return () => window.removeEventListener("resize", measure);
+				}, [backDraft, lang]);
+
+				const onScroll = () => {
+					const ta = taRef.current;
+					const back = backRef.current;
+					if (ta === null || back === null) return;
+					back.scrollTop = ta.scrollTop;
+					back.scrollLeft = ta.scrollLeft;
+				};
+
+				const all = backDraft.split("\n");
+				if (all.length > 0 && all[all.length - 1] === "") all.pop();
+				const lines = all.slice(0, FP_MAX_LINES).map((text, i) => ({ number: i + 1, text }));
+
+				const inputStyle = metrics !== null ? {
+					paddingLeft: metrics.padLeft + "px",
+					paddingTop: metrics.padTop + "px",
+					lineHeight: metrics.lineHeight + "px",
+					fontFamily: metrics.fontFamily,
+					fontSize: metrics.fontSize,
+					letterSpacing: metrics.letterSpacing,
+					tabSize: metrics.tabSize,
+				} : undefined;
+
+				return h("div", { className: "ccx-ft-codeedit" },
+					h("div", { className: "ccx-ft-codeedit-back", ref: backRef, "aria-hidden": true },
+						ReadBlock !== undefined ? h(ReadBlock, {
+							lines,
+							totalLines: all.length,
+							lang,
+							maxLines: Math.max(lines.length, 1),
+							className: "ccx-ft-codeedit-read",
+						}) : null),
+					h("textarea", {
+						ref: taRef,
+						className: "ccx-ft-codeedit-input",
+						style: inputStyle,
+						value: draft,
+						wrap: "off",
+						spellCheck: false,
+						"aria-label": baseName(props.path) || props.path,
+						onChange: props.onChange,
+						onKeyDown: props.onKeyDown,
+						onScroll,
+					}),
+				);
+			}
+
+			/** Per-file viewer/editor. One instance stays mounted per open tab, so
+			 *  switching tabs never loses loaded content or unsaved drafts. */
+			function FtFileView(props) {
+				const path = props.path;
+				const cwd = props.cwd;
+				const sessionId = props.sessionId;
+				const [data, setData] = useState(null);
+				const [mode, setMode] = useState("preview"); // preview | edit
+				const [draft, setDraft] = useState("");
+				const [dirty, setDirty] = useState(false);
+				const [mtime, setMtime] = useState(undefined);
+				const [saving, setSaving] = useState(false);
+				const [flash, setFlash] = useState(false);
+				const [error, setError] = useState("");
+				const [copied, setCopied] = useState(false);
+
+				// Report dirty state upward (tab dot + close guard); retract on unmount.
+				useEffect(() => {
+					props.onDirtyChange(path, dirty);
+					return () => props.onDirtyChange(path, false);
+				}, [path, dirty, props.onDirtyChange]);
+
+				// Load content whenever the target file changes.
+				useEffect(() => {
+					let alive = true;
+					setData(null);
+					setMode("preview");
+					setDirty(false);
+					setError("");
+					setMtime(undefined);
+					const params = new URLSearchParams();
+					params.set("path", path);
+					if (cwd !== "") params.set("cwd", cwd);
+					else if (sessionId !== undefined) params.set("session", String(sessionId));
+					fetch("/__codex/file?" + params.toString()).then(async (res) => {
+						const ctype = res.headers.get("content-type") ?? "";
+						if (!ctype.includes("application/json")) {
+							if (alive) setData({ status: "error", kind: res.status === 404 ? "route" : "http", message: "HTTP " + res.status });
+							return;
+						}
+						const body = await res.json();
+						if (!alive) return;
+						if (!res.ok || body.error !== undefined) {
+							const kind = FT_ROUTE_HINTS.has(body.error) ? "route" : body.error === "no such file" ? "missing" : "other";
+							setData({ status: "error", kind, message: body.error });
+							return;
+						}
+						setMtime(body.mtime);
+						setData({ status: "ok", body });
+						// Non-markdown text files open straight into the editor — their
+						// "preview" IS the editable textarea. Only markdown keeps the
+						// rendered-preview ⇄ source toggle (it starts rendered).
+						const textOk = body.kind === "file" && body.encoding === "utf8" && body.binary !== true && body.tooLarge !== true;
+						if (textOk && !fpIsMarkdown(body.path)) {
+							setDraft(String(body.content ?? ""));
+							setDirty(false);
+							setMode("edit");
+						}
+					}).catch((err) => {
+						if (alive) setData({ status: "error", kind: "network", message: String(err?.message ?? err) });
+					});
+					return () => { alive = false; };
+				}, [path, cwd, sessionId]);
+
+				const body = data !== null && data.status === "ok" ? data.body : null;
+				const isText = body !== null && body.kind === "file" && body.encoding === "utf8" && body.binary !== true && body.tooLarge !== true;
+				const isImage = body !== null && body.image === true && body.encoding === "base64";
+				const isMarkdownFile = isText && fpIsMarkdown(body.path);
+
+				const doSave = () => {
+					if (!dirty || saving) return;
+					setSaving(true);
+					setError("");
+					const payload = { path, content: draft };
+					if (cwd !== "") payload.cwd = cwd;
+					else if (sessionId !== undefined) payload.session = String(sessionId);
+					if (mtime !== undefined) payload.mtime = mtime;
+					fetch("/__codex/file", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(payload),
+					}).then(async (res) => {
+						const ctype = res.headers.get("content-type") ?? "";
+						const out = ctype.includes("application/json") ? await res.json().catch(() => ({})) : {};
+						if (!res.ok) {
+							setError(FT_ROUTE_HINTS.has(out.error)
+								? "保存服务未就绪：重启一次 dsh web 服务即可启用编辑保存。"
+								: out.error === "file changed on disk"
+									? "文件已在磁盘上被修改，请重新打开后再编辑。"
+									: "保存失败：" + (out.error ?? "HTTP " + res.status));
+							setSaving(false);
+							return;
+						}
+						// Pre-restart hosts answer a POST with the READ payload.
+						if (out.kind === "file" || out.mtime === undefined) {
+							setError("保存服务未就绪：重启一次 dsh web 服务即可启用编辑保存。");
+							setSaving(false);
+							return;
+						}
+						setMtime(out.mtime);
+						setDirty(false);
+						setFlash(true);
+						window.setTimeout(() => setFlash(false), 1200);
+						setSaving(false);
+					}).catch((err) => {
+						setError("保存失败：" + String(err?.message ?? err));
+						setSaving(false);
+					});
+				};
+
+				const onEditorKeyDown = (event) => {
+					if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+						event.preventDefault();
+						doSave();
+						return;
+					}
+					if (event.key === "Tab") {
+						event.preventDefault();
+						const el = event.currentTarget;
+						const start = el.selectionStart ?? draft.length;
+						const end = el.selectionEnd ?? start;
+						const next = draft.slice(0, start) + "  " + draft.slice(end);
+						setDraft(next);
+						setDirty(true);
+						requestAnimationFrame(() => {
+							try { el.setSelectionRange(start + 2, start + 2); } catch { /* noop */ }
+						});
+					}
+				};
+
+				const enterEdit = () => {
+					if (!isText || mode === "edit") return;
+					setDraft(String(body.content ?? ""));
+					setDirty(false);
+					setError("");
+					setMode("edit");
+				};
+				const backToPreview = () => {
+					if (mode !== "edit") return;
+					if (dirty && !window.confirm("有未保存的修改，确定放弃并返回预览吗？")) return;
+					setDirty(false);
+					setMode("preview");
+				};
+				const onCopyPath = () => {
+					if (copied) return;
+					const doCopy = writeClipboard !== undefined
+						? writeClipboard(path)
+						: (navigator.clipboard?.writeText(path).then(() => true).catch(() => false) ?? Promise.resolve(false));
+					doCopy.then((ok) => {
+						if (!ok) return;
+						setCopied(true);
+						window.setTimeout(() => setCopied(false), 1200);
+					});
+				};
+
+				let contentNode;
+				let flush = false;
+				if (data === null) {
+					contentNode = ftStatusPanel("⏳", "正在加载…", h("code", null, path));
+				} else if (data.status === "error") {
+					if (data.kind === "route") {
+						contentNode = ftStatusPanel("🔌", "文件服务未就绪",
+							h(React.Fragment, null,
+								h("span", null, "宿主路由尚未加载。"),
+								h("span", null, "重启一次 dsh web 服务即可查看与编辑。")));
+					} else if (data.kind === "missing") {
+						contentNode = ftStatusPanel("🫥", "文件不存在或已被删除", h("code", null, path));
+					} else {
+						contentNode = ftStatusPanel("⚠️", "加载失败", h("code", null, data.message ?? ""));
+					}
+				} else if (mode === "edit" && isText) {
+					flush = true;
+					// Overlay editor keeps syntax colors + line numbers while typing;
+					// fall back to a plain textarea when ReadBlock is unavailable.
+					contentNode = ReadBlock !== undefined
+						? h(FtCodeEditor, {
+							draft,
+							path,
+							lang: fpIsMarkdown(path) ? "markdown" : fpLang(path),
+							onChange: (event) => { setDraft(event.target.value); setDirty(true); },
+							onKeyDown: onEditorKeyDown,
+						})
+						: h("textarea", {
+							className: "ccx-ft-editor",
+							value: draft,
+							spellCheck: false,
+							onChange: (event) => { setDraft(event.target.value); setDirty(true); },
+							onKeyDown: onEditorKeyDown,
+						});
+				} else if (isImage) {
+					const mime = FP_IMAGE_MIME[fpExt(body.path)] ?? "image/png";
+					contentNode = h("div", { className: "ccx-ft-img-wrap" },
+						h("img", { className: "ccx-ft-img", src: "data:" + mime + ";base64," + body.content, alt: baseName(body.path) }));
+				} else if (body.kind === "file" && body.tooLarge === true) {
+					contentNode = ftStatusPanel("📦", "文件过大（" + fpFormatBytes(body.size) + "）", "超出上限，暂不支持查看与编辑。");
+				} else if (body.kind === "file" && body.binary === true) {
+					contentNode = ftStatusPanel("🧩", "二进制文件（" + fpFormatBytes(body.size) + "）", "内容无法以文本形式查看。");
+				} else if (isText) {
+					const content = String(body.content ?? "");
+					if (isMarkdownFile && MarkdownText !== undefined) {
+						// Workspace-relative image targets must become absolute
+						// /__codex/raw URLs or the renderer degrades them to alt text.
+						const rewritten = ccxRewriteMarkdownImages(content, path, cwd, sessionId);
+						contentNode = h(MarkdownText, { text: rewritten });
+					} else if (ReadBlock !== undefined) {
+						const all = content.split("\n");
+						if (all.length > 0 && all[all.length - 1] === "") all.pop();
+						const lines = all.map((text, i) => ({ number: i + 1, text }));
+						flush = true;
+						contentNode = h(ReadBlock, {
+							label: body.path,
+							lines,
+							totalLines: all.length,
+							lang: fpIsMarkdown(body.path) ? "markdown" : fpLang(body.path),
+							maxLines: Math.max(lines.length, 1),
+							className: "ccx-ft-read",
+						});
+					} else {
+						contentNode = h("pre", { style: { whiteSpace: "pre-wrap", fontSize: "12px" } }, content);
+					}
+				} else if (body.kind === "dir") {
+					contentNode = ftStatusPanel("📁", "这是一个目录", "请在文件树中展开查看。");
+				} else {
+					contentNode = ftStatusPanel("⚠️", "无法显示该文件", null);
+				}
+
+				return h("div", { className: "ccx-ft-fileview" },
+					h("div", { className: "ccx-ft-fileview-head" },
+						h("div", { className: "ccx-ft-fileview-title" },
+							h("span", { className: "ccx-ft-fileview-name" }, baseName(path) || path),
+							h("span", { className: "ccx-ft-fileview-path" }, path)),
+						h("div", { className: "ccx-ft-fileview-actions" },
+							mode === "edit" && dirty ? h("span", { className: "ccx-ft-dirty", title: "有未保存的修改" }) : null,
+							// Only markdown keeps the rendered ⇄ source toggle; every other
+							// text file opens straight into the editable textarea.
+							isMarkdownFile ? h("div", { className: "ccx-ft-seg" },
+								h("button", { type: "button", className: mode === "preview" ? "on" : "", onClick: backToPreview }, "预览"),
+								h("button", { type: "button", className: mode === "edit" ? "on" : "", onClick: enterEdit }, "编辑"),
+							) : null,
+							mode === "edit"
+								? h("button", {
+									type: "button",
+									className: "ccx-ft-btn primary" + (!dirty || saving ? " disabled" : ""),
+									title: "保存（Ctrl/Cmd+S）",
+									onClick: doSave,
+								}, saving ? "保存中…" : flash ? "已保存 ✓" : "保存")
+								: h("button", { type: "button", className: "ccx-ft-btn", onClick: onCopyPath }, copied ? "已复制" : "复制路径"),
+						),
+					),
+					error !== "" ? h("div", { className: "ccx-ft-error" }, error) : null,
+					h("div", { className: "ccx-ft-fileview-body" + (flush ? " flush" : "") + (mode === "edit" ? " editing" : "") }, contentNode),
+				);
+			}
+
+			return function FileTreePanel() {
+				const state = useSyncExternalStore(
+					(fn) => fileTreeStore.subscribe(fn),
+					() => fileTreeStore.get(),
+					() => fileTreeStore.get(),
+				);
+				const [width, setWidth] = useState(() => {
+					try {
+						const saved = Number(JSON.parse(localStorage.getItem(FT_WIDTH_KEY) ?? "null"));
+						if (Number.isFinite(saved) && saved >= 220 && saved <= 480) return saved;
+					} catch { /* storage unavailable */ }
+					return 280;
+				});
+				const [editorWidth, setEditorWidth] = useState(() => {
+					try {
+						const saved = Number(JSON.parse(localStorage.getItem(FT_EDITOR_WIDTH_KEY) ?? "null"));
+						if (Number.isFinite(saved) && saved >= 360 && saved <= 1200) return saved;
+					} catch { /* storage unavailable */ }
+					return 520;
+				});
+				const [treeData, setTreeData] = useState(null); // null=loading | {error} | {root,...}
+				const [expanded, setExpanded] = useState(() => new Set());
+				const [panelBg, setPanelBg] = useState(() => samplePageBg());
+				const [dirtyMap, setDirtyMap] = useState({}); // path -> has unsaved edits
+				const toggleTop = useLeftToggleTop();
+				const widthRef = useRef(width);
+				widthRef.current = width;
+				const editorWidthRef = useRef(editorWidth);
+				editorWidthRef.current = editorWidth;
+				const loadIdRef = useRef(0);
+
+				const onDirtyChange = useCallback((path, isDirty) => {
+					setDirtyMap((prev) => {
+						if ((prev[path] === true) === isDirty) return prev;
+						const next = { ...prev };
+						if (isDirty) next[path] = true;
+						else delete next[path];
+						return next;
+					});
+				}, []);
+
+				// Push the shell left while open; clean up on close/unmount.
+				useEffect(() => {
+					const html = document.documentElement;
+					if (state.open) html.classList.add("ccx-ft-open");
+					else html.classList.remove("ccx-ft-open");
+					return () => { html.classList.remove("ccx-ft-open"); };
+				}, [state.open]);
+				// Pane width variables; the editor pane contributes 0 while no tabs exist.
+				useEffect(() => {
+					const html = document.documentElement;
+					if (!state.open) return undefined;
+					html.style.setProperty("--ccx-ft-w", width + "px");
+					html.style.setProperty("--ccx-ft-ew", state.tabs.length > 0 ? editorWidth + "px" : "0px");
+					return () => {
+						html.style.removeProperty("--ccx-ft-w");
+						html.style.removeProperty("--ccx-ft-ew");
+					};
+				}, [state.open, width, editorWidth, state.tabs.length]);
+				// Match the dock background to the chat page's actual painted color.
+				useEffect(() => {
+					if (!state.open) return undefined;
+					const update = () => setPanelBg(samplePageBg());
+					update();
+					const off = ctx !== undefined && typeof ctx.on === "function" ? ctx.on("theme/change", update) : null;
+					return () => { if (off) off(); };
+				}, [state.open]);
+
+				const loadTree = useCallback(() => {
+					if (state.cwd === "" && state.sessionId === undefined) {
+						setTreeData({ error: "no-session" });
+						return;
+					}
+					const id = ++loadIdRef.current;
+					setTreeData(null);
+					const params = new URLSearchParams();
+					if (state.cwd !== "") params.set("cwd", state.cwd);
+					else params.set("session", String(state.sessionId));
+					fetch("/__codex/tree?" + params.toString()).then(async (res) => {
+						if (loadIdRef.current !== id) return;
+						const ctype = res.headers.get("content-type") ?? "";
+						if (!ctype.includes("application/json")) {
+							setTreeData({ error: res.status === 404 ? "route" : "http:" + res.status });
+							return;
+						}
+						const body = await res.json();
+						if (loadIdRef.current !== id) return;
+						if (!res.ok || body.error !== undefined) {
+							setTreeData({ error: FT_ROUTE_HINTS.has(body.error) ? "route" : String(body.error) });
+							return;
+						}
+						setTreeData({
+							root: ftBuildTree(body.entries ?? []),
+							rootPath: body.root,
+							truncated: body.truncated === true,
+						});
+					}).catch((err) => {
+						if (loadIdRef.current === id) setTreeData({ error: String(err?.message ?? err) });
+					});
+				}, [state.cwd, state.sessionId]);
+				useEffect(() => {
+					if (!state.open) return undefined;
+					loadTree();
+					return () => { loadIdRef.current += 1; };
+				}, [state.open, loadTree]);
+
+				const requestCloseTab = (path) => {
+					if (dirtyMap[path] === true && !window.confirm("「" + baseName(path) + "」有未保存的修改，确定关闭该标签页吗？")) return;
+					fileTreeStore.closeFile(path);
+				};
+
+				// Esc closes the active tab first, then the dock; typing in the editor
+				// is protected by the edit-mode confirm, so Esc there falls through.
+				useEffect(() => {
+					if (!state.open) return undefined;
+					const onKey = (event) => {
+						if (event.key !== "Escape") return;
+						const el = document.activeElement;
+						if (el !== null && el.tagName === "TEXTAREA") return; // typing in the editor
+						if (state.tabs.length > 0) requestCloseTab(state.active);
+						else fileTreeStore.close();
+					};
+					document.addEventListener("keydown", onKey);
+					return () => document.removeEventListener("keydown", onKey);
+				}, [state.open, state.tabs, state.active, dirtyMap]);
+
+				if (!state.open) {
+					return h("button", {
+						type: "button",
+						className: "ccx-ft-toggle",
+						style: { top: toggleTop + "px" },
+						title: "打开文件树",
+						"aria-label": "打开文件树",
+						onClick: () => fileTreeStore.open(),
+					}, ftPanelIcon());
+				}
+
+				const startResize = (event, getWidth, applyWidth, min, max, persistKey) => {
+					event.preventDefault();
+					const startX = event.clientX;
+					const startW = getWidth();
+					document.body.style.cursor = "col-resize";
+					document.documentElement.classList.add("ccx-ft-resizing");
+					const onMove = (ev) => {
+						const next = Math.max(min, Math.min(max, startW + (startX - ev.clientX)));
+						applyWidth(next);
+					};
+					const onUp = () => {
+						document.body.style.cursor = "";
+						document.documentElement.classList.remove("ccx-ft-resizing");
+						document.removeEventListener("mousemove", onMove);
+						document.removeEventListener("mouseup", onUp);
+						try { localStorage.setItem(persistKey, JSON.stringify(getWidth())); } catch { /* quota */ }
+					};
+					document.addEventListener("mousemove", onMove);
+					document.addEventListener("mouseup", onUp);
+				};
+				const onTreeResizeStart = (event) => startResize(event, () => widthRef.current, setWidth, 220, 480, FT_WIDTH_KEY);
+				const onEditorResizeStart = (event) => startResize(event, () => editorWidthRef.current, setEditorWidth, 360, Math.round(window.innerWidth * 0.75), FT_EDITOR_WIDTH_KEY);
+
+				const toggleExpand = (rel) => {
+					setExpanded((prev) => {
+						const next = new Set(prev);
+						if (next.has(rel)) next.delete(rel);
+						else next.add(rel);
+						return next;
+					});
+				};
+				const renderNode = (node, depth) => {
+					const isDir = node.type === "dir";
+					const isExpanded = expanded.has(node.rel);
+					const cls = "ccx-ft-row"
+						+ (state.tabs.includes(node.rel) ? " open" : "")
+						+ (state.active === node.rel ? " selected" : "");
+					const out = [h("div", {
+						key: node.rel,
+						className: cls,
+						style: { paddingLeft: (6 + depth * 14) + "px" },
+						title: node.rel,
+						onClick: () => { if (isDir) toggleExpand(node.rel); else fileTreeStore.openFile(node.rel); },
+					},
+						isDir
+							? h("span", { className: "ccx-ft-chev" + (isExpanded ? " open" : "") }, "›")
+							: h("span", { className: "ccx-ft-chev placeholder" }, "›"),
+						h("span", { className: "ccx-ft-ico" }, mentionIconReact(isDir ? "dir" : "file")),
+						h("span", { className: "ccx-ft-name" }, node.name + (isDir ? "/" : "")),
+					)];
+					if (isDir && isExpanded && node.children !== undefined) {
+						for (const child of node.children) out.push(renderNode(child, depth + 1));
+					}
+					return out;
+				};
+
+				let treeBody;
+				if (treeData === null) {
+					treeBody = ftStatusPanel("⏳", "正在加载文件树…", null);
+				} else if (treeData.error !== undefined) {
+					if (treeData.error === "route") {
+						treeBody = ftStatusPanel("🔌", "文件树服务未就绪",
+							h(React.Fragment, null,
+								h("span", null, "宿主路由 /__codex/tree 尚未加载。"),
+								h("span", null, "重启一次 dsh web 服务即可启用。")));
+					} else if (treeData.error === "no-session") {
+						treeBody = ftStatusPanel("💬", "尚无活动会话", "打开一个会话后即可查看其项目文件。");
+					} else {
+						treeBody = ftStatusPanel("⚠️", "加载失败", h("code", null, String(treeData.error)));
+					}
+				} else if (treeData.root.children.length === 0) {
+					treeBody = ftStatusPanel("📂", "空的工作区", h("code", null, treeData.rootPath ?? ""));
+				} else {
+					treeBody = h("div", { className: "ccx-ft-tree" },
+						treeData.root.children.map((child) => renderNode(child, 0)),
+						treeData.truncated ? h("div", { className: "ccx-ft-note" }, "文件过多，列表已截断。") : null,
+					);
+				}
+
+				return h(React.Fragment, null,
+					h("button", {
+						type: "button",
+						className: "ccx-ft-toggle active",
+						style: { top: toggleTop + "px" },
+						title: "收起文件树",
+						"aria-label": "收起文件树",
+						onClick: () => fileTreeStore.close(),
+					}, ftPanelIcon()),
+					h("div", {
+						className: "ccx-ft-root",
+						role: "complementary",
+						"aria-label": "项目文件",
+						style: panelBg !== ""
+							? { background: panelBg, "--ccx-ft-bg": panelBg }
+							: undefined,
+					},
+						state.tabs.length > 0 ? h("section", { className: "ccx-ft-editors", "aria-label": "打开的文件" },
+							h("div", { className: "ccx-ft-resize", onMouseDown: onEditorResizeStart, title: "拖动调整编辑区宽度" }),
+							h("div", { className: "ccx-ft-tabs", role: "tablist", "aria-label": "文件标签页" },
+								state.tabs.map((tab) => h("div", {
+									key: tab,
+									role: "tab",
+									"aria-selected": tab === state.active ? "true" : "false",
+									className: "ccx-ft-tab" + (tab === state.active ? " active" : ""),
+									title: tab,
+									onClick: () => fileTreeStore.setActive(tab),
+								},
+									h("span", { className: "ccx-ft-ico" }, mentionIconReact("file")),
+									h("span", { className: "ccx-ft-tab-name" }, baseName(tab)),
+									dirtyMap[tab] === true ? h("span", { className: "ccx-ft-tab-dirty", title: "有未保存的修改" }) : null,
+									h("button", {
+										type: "button",
+										className: "ccx-ft-tab-close",
+										title: "关闭标签页",
+										onClick: (ev) => { ev.stopPropagation(); requestCloseTab(tab); },
+									}, "✕")))),
+							h("div", { className: "ccx-ft-tabviews" },
+								state.tabs.map((tab) => h("div", {
+									key: tab,
+									className: "ccx-ft-tabview",
+									style: tab === state.active ? undefined : { display: "none" },
+								}, h(FtFileView, {
+									path: tab,
+									cwd: state.cwd,
+									sessionId: state.sessionId,
+									onDirtyChange,
+								})))),
+						) : null,
+						h("section", { className: "ccx-ft-treepane", "aria-label": "项目文件树" },
+							h("div", { className: "ccx-ft-resize", onMouseDown: onTreeResizeStart, title: "拖动调整文件树宽度" }),
+							h("div", { className: "ccx-ft-head" },
+								h("span", { className: "ccx-ft-head-ico" }, mentionIconReact("dir")),
+								h("div", { className: "ccx-ft-head-title" },
+									h("span", { className: "ccx-ft-head-name" }, baseName(treeData?.rootPath ?? state.cwd ?? "") || "工作区"),
+									h("span", { className: "ccx-ft-head-path" }, treeData?.rootPath ?? state.cwd ?? "")),
+								h("div", { className: "ccx-ft-head-actions" },
+									h("button", { type: "button", className: "ccx-ft-btn", title: "刷新文件树", onClick: () => loadTree() }, "⟳"),
+									h("button", { type: "button", className: "ccx-ft-btn", title: "全部折叠", onClick: () => setExpanded(new Set()) }, "⊟")),
+							),
+							h("div", { className: "ccx-ft-body" }, treeBody),
+						),
+					),
+				);
+			};
 		}
 		//#endregion

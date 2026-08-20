@@ -291,6 +291,170 @@ html.ccx-wide-chat .ccx-cards-row {
 @keyframes ccx-dot { 0%,60%,100% { opacity:.25 } 30% { opacity:1 } }
 .ccx-note { font-size:12px; color:var(--dsw-alias-label-caption); }
 .ccx-refresh { position:absolute; top:8px; right:0; height:28px; padding:0 10px; font-size:12px; color:var(--dsw-alias-label-secondary); }
+/* ── file preview sidebar (right-hand push panel) ── */
+/* Push the whole shell left by the panel width while it is open. */
+html.ccx-fp-open #root {
+	margin-right: var(--ccx-fp-w, 540px) !important;
+	transition: margin-right .18s ease-out;
+}
+/* No slide animation while the user drags the resize handle. */
+html.ccx-fp-resizing #root { transition: none; }
+/* Keep the floating cards row clear of the open panel. */
+html.ccx-fp-open .ccx-cards-row { right: calc(var(--ccx-fp-w, 540px) + 24px); }
+/* The panel background is set inline from the theme's solid base color
+   (wallpaper-safe: never the translucent override); --ccx-fp-bg mirrors it
+   for nested surfaces like the sticky code banner. */
+.ccx-fp { position:fixed; top:0; right:0; bottom:0; width:var(--ccx-fp-w, 540px); z-index:87; display:flex; flex-direction:column; background:var(--ccx-fp-bg, var(--dsw-alias-bg-base)); border-left:1px solid var(--dsw-alias-border-l2); box-shadow:-14px 0 36px rgba(0,0,0,.20); animation:ccx-fp-in .18s ease-out; }
+@keyframes ccx-fp-in { from { transform:translateX(26px); opacity:.35 } to { transform:none; opacity:1 } }
+.ccx-fp-resize { position:absolute; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:2; }
+.ccx-fp-resize:hover, .ccx-fp-resize.active { background:color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent); }
+.ccx-fp-head { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--dsw-alias-border-l1); flex:none; }
+.ccx-fp-icon { flex:none; color:var(--dsw-alias-state-business-primary); display:grid; place-items:center; }
+.ccx-fp-title { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.ccx-fp-name { font-size:13px; font-weight:600; color:var(--dsw-alias-label-primary); font-family:var(--ds-font-family-code, ui-monospace, monospace); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ccx-fp-path { font-size:11px; color:var(--dsw-alias-label-caption); font-family:var(--ds-font-family-code, ui-monospace, monospace); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left; }
+.ccx-fp-actions { flex:none; display:flex; align-items:center; gap:2px; }
+.ccx-fp-btn { height:26px; padding:0 8px; border:none; border-radius:7px; background:transparent; color:var(--dsw-alias-label-secondary); font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }
+.ccx-fp-btn:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
+.ccx-fp-btn.on { background:var(--dsw-alias-interactive-bg-hover-accent); color:var(--dsw-alias-label-primary); }
+.ccx-fp-seg { display:flex; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; overflow:hidden; }
+.ccx-fp-seg button { border:none; background:transparent; color:var(--dsw-alias-label-caption); font-size:11px; padding:4px 9px; cursor:pointer; }
+.ccx-fp-seg button.on { background:var(--dsw-alias-interactive-bg-hover-accent); color:var(--dsw-alias-label-primary); font-weight:500; }
+.ccx-fp-body { flex:1; min-height:0; overflow:auto; padding:16px 18px; }
+.ccx-fp-body.flush { padding:0; }
+.ccx-fp-status { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; height:100%; min-height:180px; color:var(--dsw-alias-label-caption); font-size:13px; text-align:center; padding:24px; }
+.ccx-fp-status .ccx-fp-status-icon { font-size:26px; }
+.ccx-fp-status code { font-family:var(--ds-font-family-code, ui-monospace, monospace); font-size:12px; color:var(--dsw-alias-label-secondary); word-break:break-all; }
+.ccx-fp-img-wrap { display:grid; place-items:center; min-height:240px; border-radius:10px; border:1px solid var(--dsw-alias-border-l1); background:repeating-conic-gradient(color-mix(in srgb, var(--dsw-alias-label-caption) 7%, transparent) 0% 25%, transparent 0% 50%) 0 0 / 18px 18px; padding:14px; }
+.ccx-fp-img { max-width:100%; height:auto; border-radius:6px; }
+.ccx-fp-meta { display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--dsw-alias-label-caption); font-family:var(--ds-font-family-code, ui-monospace, monospace); }
+.ccx-fp-dir { display:flex; flex-direction:column; gap:2px; }
+.ccx-fp-dir-item { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:8px; font-size:12.5px; font-family:var(--ds-font-family-code, ui-monospace, monospace); color:var(--dsw-alias-label-primary); }
+.ccx-fp-dir-item:hover { background:var(--dsw-alias-interactive-bg-hover); cursor:pointer; }
+.ccx-fp-dir-item .ccx-fp-dir-type { flex:none; width:16px; text-align:center; color:var(--dsw-alias-label-caption); }
+/* The reused ReadBlock fills the panel instead of capping to a card. */
+.ccx-fp [data-read] { border:none; border-radius:0; background:transparent; }
+.ccx-fp [data-read] > div:first-child { position:sticky; top:0; z-index:1; background:var(--ccx-fp-bg, var(--dsw-alias-bg-base)); border-bottom:1px solid var(--dsw-alias-border-l1); }
+.ccx-fp [data-read] > div:last-child { max-height:none !important; overflow:visible !important; }
+/* Markdown source view keeps the fence block styling but drops card margins. */
+.ccx-fp .md-code-block { margin:0; }
+/* ── clickable file rows in the git card ── */
+.ccx-git-file.clickable { cursor:pointer; }
+.ccx-git-file.clickable:hover .ccx-git-file-path { color:var(--dsw-alias-state-business-primary); }
+.ccx-git-untracked { flex:none; font-size:10px; color:var(--dsw-alias-label-caption); border:1px solid var(--dsw-alias-border-l1); border-radius:5px; padding:0 5px; }
+/* ── inline-code path hints inside conversation messages ── */
+code.ccx-filehint { cursor:pointer; }
+code.ccx-filehint > * { cursor:pointer; }
+html.ccx-fp-hints code.ccx-filehint { text-decoration:underline dotted color-mix(in srgb, var(--dsw-alias-state-business-primary) 65%, transparent); text-underline-offset:3px; }
+/* ── file tree dock (Codex-style right dock: tabbed editors + tree) ── */
+/* Push the whole shell left by the dock width (tree pane + editor pane). */
+html.ccx-ft-open #root {
+	margin-right: calc(var(--ccx-ft-w, 280px) + var(--ccx-ft-ew, 0px)) !important;
+	transition: margin-right .18s ease-out;
+}
+/* No slide animation while the user drags a resize handle. */
+html.ccx-ft-resizing #root { transition: none; }
+/* Keep the floating cards row clear of the open dock. */
+html.ccx-ft-open .ccx-cards-row { right: calc(var(--ccx-ft-w, 280px) + var(--ccx-ft-ew, 0px) + 24px); }
+/* Toggle button: fixed to the top-right corner; its vertical position is
+   measured at runtime from the left sidebar's fold toggle so both sit at
+   one height. */
+.ccx-ft-toggle { position:fixed; top:22px; right:12px; z-index:88; width:28px; height:28px; border:none; border-radius:50%; background:transparent; color:var(--dsw-alias-label-secondary); cursor:pointer; display:grid; place-items:center; transition:background-color .12s, color .12s; }
+.ccx-ft-toggle:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
+.ccx-ft-toggle.active { color:var(--dsw-alias-state-business-primary); }
+/* The dock background is set inline from the theme's solid base color
+   (wallpaper-safe); --ccx-ft-bg mirrors it for nested sticky surfaces.
+   Layout: [ tabbed editor pane (only while files are open) | tree pane ]. */
+.ccx-ft-root { position:fixed; top:0; right:0; bottom:0; z-index:87; display:flex; background:var(--ccx-ft-bg, var(--dsw-alias-bg-base)); animation:ccx-ft-in .18s ease-out; }
+@keyframes ccx-ft-in { from { transform:translateX(26px); opacity:.35 } to { transform:none; opacity:1 } }
+.ccx-ft-treepane, .ccx-ft-editors { position:relative; display:flex; flex-direction:column; min-width:0; flex:none; }
+/* The tree pane keeps the far-right edge; the editor pane sits to its left. */
+.ccx-ft-treepane { width:var(--ccx-ft-w, 280px); border-left:1px solid var(--dsw-alias-border-l2); box-shadow:-14px 0 36px rgba(0,0,0,.20); }
+.ccx-ft-editors { width:var(--ccx-ft-ew, 520px); border-left:1px solid var(--dsw-alias-border-l2); box-shadow:-14px 0 36px rgba(0,0,0,.20); animation:ccx-ft-in .18s ease-out; }
+.ccx-ft-resize { position:absolute; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:3; }
+.ccx-ft-resize:hover { background:color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent); }
+/* ── editor pane: tab bar + stacked per-file views ── */
+.ccx-ft-tabs { display:flex; align-items:center; gap:4px; min-height:60px; padding:8px 10px; border-bottom:1px solid var(--dsw-alias-border-l1); flex:none; overflow-x:auto; overflow-y:hidden; box-sizing:border-box; scrollbar-width:thin; }
+.ccx-ft-tab { flex:none; display:inline-flex; align-items:center; gap:6px; max-width:190px; height:32px; padding:0 5px 0 10px; border-radius:9px; border:1px solid transparent; background:transparent; color:var(--dsw-alias-label-secondary); font-size:12px; font-family:var(--ds-font-family-code, ui-monospace, monospace); cursor:pointer; }
+.ccx-ft-tab:hover { background:var(--dsw-alias-interactive-bg-hover); }
+.ccx-ft-tab.active { background:var(--dsw-alias-interactive-bg-hover-accent); border-color:var(--dsw-alias-border-l2); color:var(--dsw-alias-label-primary); }
+.ccx-ft-tab .ccx-ft-ico { color:var(--dsw-alias-label-caption); }
+.ccx-ft-tab.active .ccx-ft-ico { color:var(--dsw-alias-state-business-primary); }
+.ccx-ft-tab-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ccx-ft-tab-dirty { flex:none; width:6px; height:6px; border-radius:50%; background:var(--dsw-alias-state-warn-primary); }
+.ccx-ft-tab-close { flex:none; width:18px; height:18px; border:none; border-radius:6px; background:transparent; color:var(--dsw-alias-label-caption); cursor:pointer; display:grid; place-items:center; font-size:11px; line-height:1; padding:0; }
+.ccx-ft-tab-close:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
+.ccx-ft-tabviews { flex:1; min-height:0; display:flex; flex-direction:column; }
+.ccx-ft-tabview { flex:1; min-height:0; display:flex; flex-direction:column; }
+/* Header leaves room on the right for the fixed toggle button. */
+.ccx-ft-head { display:flex; align-items:center; gap:8px; min-height:60px; padding:8px 48px 8px 14px; border-bottom:1px solid var(--dsw-alias-border-l1); flex:none; box-sizing:border-box; }
+.ccx-ft-head-ico { flex:none; color:var(--dsw-alias-state-business-primary); display:grid; place-items:center; }
+.ccx-ft-head-title { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.ccx-ft-head-name { font-size:13px; font-weight:600; color:var(--dsw-alias-label-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ccx-ft-head-path { font-size:11px; color:var(--dsw-alias-label-caption); font-family:var(--ds-font-family-code, ui-monospace, monospace); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left; }
+.ccx-ft-head-actions { flex:none; display:flex; align-items:center; gap:2px; }
+.ccx-ft-btn { height:26px; min-width:26px; padding:0 7px; border:none; border-radius:7px; background:transparent; color:var(--dsw-alias-label-secondary); font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:4px; white-space:nowrap; }
+.ccx-ft-btn:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
+.ccx-ft-btn.primary { background:var(--dsw-alias-button-info-fill); color:#fff; }
+.ccx-ft-btn.primary:hover { background:var(--dsw-alias-button-info-hover); }
+.ccx-ft-btn.disabled { opacity:.45; pointer-events:none; }
+.ccx-ft-body { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; }
+.ccx-ft-status { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; height:100%; min-height:160px; color:var(--dsw-alias-label-caption); font-size:13px; text-align:center; padding:24px; }
+.ccx-ft-status .ccx-ft-status-icon { font-size:26px; }
+.ccx-ft-status code { font-family:var(--ds-font-family-code, ui-monospace, monospace); font-size:12px; color:var(--dsw-alias-label-secondary); word-break:break-all; }
+/* ── tree rows ── */
+.ccx-ft-tree { padding:6px 6px 18px; }
+.ccx-ft-row { display:flex; align-items:center; gap:5px; height:26px; padding-right:8px; border-radius:7px; font-size:12.5px; color:var(--dsw-alias-label-primary); cursor:pointer; user-select:none; white-space:nowrap; }
+.ccx-ft-row:hover { background:var(--dsw-alias-interactive-bg-hover); }
+.ccx-ft-row.selected { background:var(--dsw-alias-interactive-bg-hover-accent); }
+/* Rows whose file is open in a tab get a tinted icon (active row also bg). */
+.ccx-ft-row.open .ccx-ft-ico { color:var(--dsw-alias-state-business-primary); }
+.ccx-ft-chev { flex:none; width:14px; text-align:center; color:var(--dsw-alias-label-caption); font-size:12px; transform:rotate(0deg); transition:transform .1s ease-out; }
+.ccx-ft-chev.open { transform:rotate(90deg); }
+.ccx-ft-chev.placeholder { visibility:hidden; }
+.ccx-ft-ico { flex:none; display:grid; place-items:center; color:var(--dsw-alias-label-caption); }
+.ccx-ft-row.selected .ccx-ft-ico, .ccx-ft-row.selected .ccx-ft-name { color:var(--dsw-alias-state-business-primary); }
+.ccx-ft-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; font-family:var(--ds-font-family-code, ui-monospace, monospace); }
+.ccx-ft-note { padding:10px 12px; font-size:11px; color:var(--dsw-alias-label-caption); }
+/* ── file view (viewer + editor, one per open tab) ── */
+.ccx-ft-fileview { display:flex; flex-direction:column; flex:1; min-height:0; }
+.ccx-ft-fileview-head { display:flex; align-items:center; gap:6px; min-height:42px; padding:6px 12px; border-bottom:1px solid var(--dsw-alias-border-l1); flex:none; box-sizing:border-box; }
+.ccx-ft-fileview-title { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.ccx-ft-fileview-name { font-size:13px; font-weight:600; color:var(--dsw-alias-label-primary); font-family:var(--ds-font-family-code, ui-monospace, monospace); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ccx-ft-fileview-path { font-size:11px; color:var(--dsw-alias-label-caption); font-family:var(--ds-font-family-code, ui-monospace, monospace); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left; }
+.ccx-ft-fileview-actions { flex:none; display:flex; align-items:center; gap:4px; }
+.ccx-ft-seg { display:flex; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; overflow:hidden; }
+.ccx-ft-seg button { border:none; background:transparent; color:var(--dsw-alias-label-caption); font-size:11px; padding:4px 9px; cursor:pointer; }
+.ccx-ft-seg button.on { background:var(--dsw-alias-interactive-bg-hover-accent); color:var(--dsw-alias-label-primary); font-weight:500; }
+.ccx-ft-dirty { flex:none; width:7px; height:7px; border-radius:50%; background:var(--dsw-alias-state-warn-primary); }
+.ccx-ft-error { flex:none; padding:6px 12px; font-size:12px; color:var(--dsw-alias-state-error-primary); background:var(--dsw-alias-interactive-bg-hover-danger); border-bottom:1px solid var(--dsw-alias-border-l1); }
+.ccx-ft-fileview-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; }
+.ccx-ft-fileview-body.flush { padding:0; }
+.ccx-ft-fileview-body.editing { padding:0; display:flex; flex-direction:column; }
+.ccx-ft-editor { flex:1; min-height:0; width:100%; border:none; outline:none; resize:none; padding:12px 14px; background:transparent; color:var(--dsw-alias-label-primary); font-family:var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace); font-size:12.5px; line-height:20px; tab-size:4; }
+/* ── overlay code editor: highlighted ReadBlock backdrop + transparent textarea ── */
+.ccx-ft-codeedit { position:relative; flex:1; min-height:0; }
+/* Backdrop layer: the platform ReadBlock (syntax colors + line numbers). */
+.ccx-ft-codeedit-back { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+/* The platform block ships margin:16px 0 — strip it so the textarea layer
+   (inset:0 over the same box) lines up from the very first line. */
+.ccx-ft-codeedit-back [data-read] { border:none; border-radius:0; background:transparent; margin:0 !important; }
+/* Hide the ReadBlock banner (label/copy row) — the file head already covers it. */
+.ccx-ft-codeedit-back [data-read] > div:first-child { display:none; }
+.ccx-ft-codeedit-back [data-read] > div:last-child { max-height:none !important; overflow:visible !important; }
+/* Input layer: invisible text, visible caret; font metrics are copied from the
+   measured backdrop so glyphs overlap exactly. */
+.ccx-ft-codeedit-input { position:absolute; inset:0; width:100%; height:100%; margin:0; border:none; outline:none; resize:none; overflow:auto; background:transparent; color:transparent; caret-color:var(--dsw-alias-label-primary); padding:0; white-space:pre; }
+.ccx-ft-codeedit-input::selection { background:color-mix(in srgb, var(--dsw-alias-state-business-primary) 32%, transparent); color:transparent; }
+.ccx-ft-img-wrap { display:grid; place-items:center; min-height:200px; border-radius:10px; border:1px solid var(--dsw-alias-border-l1); background:repeating-conic-gradient(color-mix(in srgb, var(--dsw-alias-label-caption) 7%, transparent) 0% 25%, transparent 0% 50%) 0 0 / 18px 18px; padding:14px; }
+.ccx-ft-img { max-width:100%; height:auto; border-radius:6px; }
+/* The reused ReadBlock fills the panel instead of capping to a card. */
+.ccx-ft-root [data-read] { border:none; border-radius:0; background:transparent; }
+.ccx-ft-root [data-read] > div:first-child { position:sticky; top:0; z-index:1; background:var(--ccx-ft-bg, var(--dsw-alias-bg-base)); border-bottom:1px solid var(--dsw-alias-border-l1); }
+.ccx-ft-root [data-read] > div:last-child { max-height:none !important; overflow:visible !important; }
+.ccx-ft-root .md-code-block { margin:0; }
+/* Rendered markdown images (rewritten to /__codex/raw) scale to the pane. */
+.ccx-ft-fileview-body img:not(.ccx-ft-img), .ccx-fp-body img:not(.ccx-fp-img) { max-width:100%; height:auto; border-radius:6px; }
 `;
 		function installStyles() {
 			if (typeof document === "undefined") return () => {};
