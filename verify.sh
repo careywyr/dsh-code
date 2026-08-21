@@ -20,3 +20,5 @@ curl -s -w " [HTTP %{http_code}]" -X POST -H 'content-type: application/json' \
 echo "== 8. raw route (markdown images; serves real bytes with a mime type) =="
 curl -s -o /dev/null -w "%{http_code} %{content_type} %{size_download} bytes\n" \
 	"$BASE/__codex/raw?cwd=$(pwd)&path=docs/screenshots/home-mocha.png"
+echo "== 9. version route (running DeepSeek Harness version) =="
+curl -s -w " [HTTP %{http_code}]" "$BASE/__codex/version"; echo

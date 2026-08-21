@@ -163,6 +163,32 @@
 				h("div", { className: "ccx-note" }, "累计曲线 · 近 " + Math.min(180, Object.keys(daily).length) + " 天 · 合计 " + formatTokens(total) + " Token"),
 			);
 		}
+		/** Read-only row at the bottom of the native General settings section
+		 *  showing the running DeepSeek Harness version (host `/__codex/version`). */
+		function makeDshVersionItem(ctx) {
+			return function DshVersionItem() {
+				const [version, setVersion] = useState(null); // null = loading, "" = unknown
+				useEffect(() => {
+					let alive = true;
+					(async () => {
+						try {
+							const res = await fetch("/__codex/version");
+							if (!res.ok) { if (alive) setVersion(""); return; }
+							const data = await res.json();
+							if (alive) setVersion(typeof data?.version === "string" && data.version !== "" ? data.version : "");
+						} catch {
+							if (alive) setVersion(""); // host route not loaded yet
+						}
+					})();
+					return () => { alive = false; };
+				}, []);
+				const text = version === null ? "加载中…" : (version !== "" ? version : "未知");
+				return h("div", { className: "ccx-ver-group" },
+					h("div", { className: "ccx-ver-title" }, "DeepSeek Harness 版本"),
+					h("div", { className: "ccx-ver-value" }, text),
+				);
+			};
+		}
 		function makeProfileSection(ctx, config, useConfig) {
 			return function ProfileSection() {
 				const cfg = useConfig();
@@ -494,6 +520,15 @@
 				label: () => "个人资料",
 			}, ProfileSection)), "dsh-code: profile settings");
 
+			// DeepSeek Harness version row at the bottom of the native General section.
+			const DshVersionItem = makeDshVersionItem(ctx);
+			ctx.effect(() => ctx.slots.inject("settings.general.item", () => ctx.slots.register({
+				name: "settings.general.item",
+				id: "codex-dsh-version",
+				order: 100,
+				label: () => "DeepSeek Harness 版本",
+			}, DshVersionItem)), "dsh-code: harness version item");
+
 			// Home quick-prompt cards above the composer (hero phase only).
 			const HomeCards = makeHomeCards(ctx, config, useConfig);
 			ctx.effect(() => ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
@@ -589,7 +624,7 @@
 		exports.inject = inject;
 		exports.apply = apply;
 		/** Internal hooks for unit tests / debugging. */
-		exports.__filePreview = { store: filePreviewStore };
+		exports.__filePreview = { store: filePreviewStore, buildDiffModel: fpBuildDiffModel, renderDiffBody: fpRenderDiffBody };
 		exports.__fileTree = {
 			store: fileTreeStore,
 			buildTree: ftBuildTree,

@@ -26,7 +26,8 @@
      - 「在文件夹中显示」按钮保持原生；
      - 会话视图（`[data-phase]`）内形似路径的行内 `<code>`（含 `/` 或已知扩展名，
        无空格、非 URL）也可点击；hover 时加虚线下划线提示（`ccx-filehint`）；
-   - GitCard 文件行整行可点击，未跟踪文件显示「未跟踪」徽标。
+   - GitCard 文件行整行可点击，未跟踪文件显示「未跟踪」徽标；点击打开的是
+     IDEA 风格的两栏 git diff（见文末「Git 变更对比」一节），不再是普通文件预览。
    - **侧边栏与会话绑定**：切换到其它会话自动关闭（store.setSession 检测
      sessionId 变化）。
 3. **侧边栏面板**（`shell.overlay` 插槽，推挤式）
@@ -60,3 +61,34 @@
   工具卡片 fileLink 命中、「在文件夹中显示」保持原生）+ 面板开/关/加载态渲染 +
   背景取主题纯色 + 切换会话关闭预览。
 - `sh verify.sh`：线上路由与引导图健康检查（新增第 3 步 file 路由）。
+
+## Git 变更对比（GitCard 点击 → 两栏 diff）
+
+后续迭代：GitCard 文件行点击不再打开普通文件预览，而是打开 IDEA / JetBrains
+风格的**两栏并排对比**（复用同一右侧推挤式面板，打开时自动加宽到 ≥780px）。
+
+1. **宿主路由** `GET /__codex/git-diff?file=<相对路径>[&cwd=…|session=…]`
+   （`lib/index.js`）
+   - 旧版本取 `git show HEAD:<file>`；无提交的新仓库回退索引版本 `git show :<file>`；
+     新版本取工作区文件。口径与 GitCard 统计一致（`git diff HEAD`，含暂存）；
+   - 单文件 numstat 给出 `+a/−d`；任一侧为 `-` 或 NUL 嗅探命中 → `binary`；
+   - `kind`：`??` → untracked；无旧有新 → added；有旧无新 → deleted；其余 modified；
+   - 路径必须留在工作区内（与 `/__codex/raw` 相同的越界拒绝），文本上限 1.5 MB。
+2. **客户端**（`src-client/part2.js`）
+   - `filePreviewStore.openDiff(path, rel)`：新增 diff 态（`state.diff`），普通
+     `open()` 会清掉 diff 态；头部显示 修改/新增/删除/未跟踪 徽标与 `+a −d`，
+     并提供「预览文件」一键切回普通预览；
+   - 内置 Myers O(ND) 行 diff（先剥公共前后缀；`n+m>8000`、`n*m>1e6` 或
+     `D>256` 时降级为整块替换，保证不卡死），删除/插入 run 逐行配对对齐；
+   - 配对行再做词级 LCS 行内高亮（长度乘积守卫），对应 IDEA 的碎片差异；
+   - 单表格四列（行号|旧内容|行号|新内容）天然双栏同步滚动；超过 8000 行截断提示；
+   - **修改处定位/导航**：`fpBuildDiffModel` 汇总 hunk（连续 change 行的起点
+     索引）。打开后自动滚动到第一处修改（`fpScrollToRow`，留 ~84px 上边距）；
+     头部提供 ↑/↓ 分段按钮 + 「当前/总数」计数，在 hunk 之间平滑跳转，越界禁用。
+3. **验证**：`node /tmp/test-git-diff.mjs`（服务端：修改/删除/未跟踪/二进制/
+   越界拒绝/无提交仓库索引回退）、`node /tmp/test-client-diff.mjs`（diff 引擎
+   25 项断言含 300 次随机往返模糊）、`node /tmp/test-route-wiring.mjs`
+   （apply 注册 + handler 端到端）、`node /tmp/test-diff-nav.mjs`（hunk 模型 +
+   双栏 markup + 增/删/二进制/无差异分支 + store diff 态 + 面板 diff 渲染）。
+   宿主路由随 dsh web 启动加载，**更新后需重启一次 dsh web**；重启前面板显示
+   「差异服务未就绪」。

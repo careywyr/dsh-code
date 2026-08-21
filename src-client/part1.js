@@ -142,6 +142,12 @@ html.ccx-wide-chat .ccx-cards-row {
 .ccx-qitem-prompt { font-size:12px; color:var(--dsw-alias-label-caption); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ccx-iconbtn { flex:none; width:26px; height:26px; border:none; border-radius:8px; background:transparent; color:var(--dsw-alias-label-caption); cursor:pointer; font-size:13px; }
 .ccx-iconbtn:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-state-error-primary); }
+/* ── harness version row (bottom of the native General settings section) ──
+   Mirrors the native settings item "group" so it blends in; the section CSS
+   already strips the border-bottom of the last item, which this row is. */
+.ccx-ver-group { display:flex; flex-direction:column; gap:8px; padding:16px 0; border-bottom:1px solid var(--dsw-alias-border-l2); }
+.ccx-ver-title { font-size:14px; font-weight:400; line-height:22px; color:var(--dsw-alias-label-primary); }
+.ccx-ver-value { font-size:13px; line-height:20px; color:var(--dsw-alias-label-secondary); font-family:var(--ds-font-family-code, ui-monospace, monospace); }
 /* ── profile page ── */
 .ccx-profile-head { position:relative; display:flex; flex-direction:column; align-items:center; gap:12px; padding:28px 2px 8px; text-align:center; }
 .ccx-avatar-wrap { position:relative; flex:none; }
@@ -455,6 +461,42 @@ html.ccx-ft-open .ccx-cards-row { right: calc(var(--ccx-ft-w, 280px) + var(--ccx
 .ccx-ft-root .md-code-block { margin:0; }
 /* Rendered markdown images (rewritten to /__codex/raw) scale to the pane. */
 .ccx-ft-fileview-body img:not(.ccx-ft-img), .ccx-fp-body img:not(.ccx-fp-img) { max-width:100%; height:auto; border-radius:6px; }
+/* ── git diff viewer (IDEA-style two-pane side-by-side comparison) ── */
+/* The diff body is a flush flex column: pane labels, scrollable table, banner. */
+.ccx-fp-body.diff { padding:0; display:flex; flex-direction:column; }
+/* Change-kind badge + +/- stats in the panel head. */
+.ccx-fp-name .ccx-diff-badge { margin-left:8px; }
+.ccx-diff-badge { display:inline-block; vertical-align:1px; font-size:10px; font-weight:500; padding:1px 7px; border-radius:6px; border:1px solid var(--dsw-alias-border-l2); color:var(--dsw-alias-label-secondary); font-family:inherit; }
+.ccx-diff-badge.added, .ccx-diff-badge.untracked { color:var(--dsw-alias-state-success-primary); border-color:color-mix(in srgb, var(--dsw-alias-state-success-primary) 45%, transparent); background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent); }
+.ccx-diff-badge.deleted { color:var(--dsw-alias-state-error-primary); border-color:color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent); background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent); }
+.ccx-diff-badge.modified { color:var(--dsw-alias-state-warn-primary); border-color:color-mix(in srgb, var(--dsw-alias-state-warn-primary) 45%, transparent); background:color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent); }
+.ccx-diff-stats { display:inline-flex; gap:6px; margin-left:8px; font-family:var(--ds-font-family-code, ui-monospace, monospace); font-size:11px; }
+/* Pane labels above the two columns. */
+.ccx-diff-bar { flex:none; display:flex; border-bottom:1px solid var(--dsw-alias-border-l1); font-size:11px; color:var(--dsw-alias-label-caption); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 55%, transparent); }
+.ccx-diff-bar > span { flex:1; min-width:0; padding:5px 10px 5px 52px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ccx-diff-bar > span + span { border-left:1px solid var(--dsw-alias-border-l1); }
+.ccx-diff-scroll { flex:1; min-height:0; overflow:auto; }
+table.ccx-diff { border-collapse:collapse; table-layout:fixed; width:100%; font-family:var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace); font-size:12px; line-height:20px; }
+.ccx-diff col.ccx-diff-col-no { width:44px; }
+.ccx-diff td { vertical-align:top; color:var(--dsw-alias-label-primary); }
+.ccx-diff td.ccx-diff-no { padding:0 6px; text-align:right; color:var(--dsw-alias-label-caption); font-size:11px; user-select:none; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 60%, transparent); border-right:1px solid var(--dsw-alias-border-l1); }
+.ccx-diff td.ccx-diff-code { padding:0 8px; white-space:pre-wrap; word-break:break-word; }
+/* Center divider between the two panes. */
+.ccx-diff td.ccx-diff-no + td.ccx-diff-code + td.ccx-diff-no { border-left:1px solid var(--dsw-alias-border-l2); }
+/* Removed / added / filler cells (IDEA-style tinting). */
+.ccx-diff td.del { background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent); }
+.ccx-diff td.del.ccx-diff-no { background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent); color:color-mix(in srgb, var(--dsw-alias-state-error-primary) 75%, var(--dsw-alias-label-primary)); }
+.ccx-diff td.ins { background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent); }
+.ccx-diff td.ins.ccx-diff-no { background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 18%, transparent); color:color-mix(in srgb, var(--dsw-alias-state-success-primary) 75%, var(--dsw-alias-label-primary)); }
+.ccx-diff td.pad { background:color-mix(in srgb, var(--dsw-alias-label-caption) 7%, transparent); }
+/* Word-level highlights inside a modified pair. */
+.ccx-diff-hl-del { background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 30%, transparent); border-radius:2px; }
+.ccx-diff-hl-ins { background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 32%, transparent); border-radius:2px; }
+.ccx-diff-more { flex:none; padding:8px 12px; text-align:center; color:var(--dsw-alias-label-caption); font-size:12px; border-top:1px solid var(--dsw-alias-border-l1); }
+/* Prev/next change navigation in the panel head. */
+.ccx-diff-count { font-size:11px; color:var(--dsw-alias-label-caption); font-family:var(--ds-font-family-code, ui-monospace, monospace); white-space:nowrap; padding:0 1px; }
+.ccx-diff-nav button { min-width:26px; padding:4px 7px; font-size:13px; line-height:1; }
+.ccx-diff-nav button:disabled { opacity:.35; pointer-events:none; }
 `;
 		function installStyles() {
 			if (typeof document === "undefined") return () => {};

@@ -65,10 +65,261 @@
 			return b + "/" + r;
 		}
 
+		// ── line diff engine (powers the IDEA-style two-pane comparison) ──
+		/** Split content into lines; a trailing newline does not add a phantom row. */
+		function fpSplitLines(text) {
+			const all = String(text ?? "").split("\n");
+			if (all.length > 0 && all[all.length - 1] === "") all.pop();
+			return all;
+		}
+		/** Myers O(ND) line diff → steps [{t:'eq'|'del'|'ins', oldNo, newNo, text}]
+		 *  with 1-based line numbers (0 on the side the step does not exist on).
+		 *  Common prefix/suffix are trimmed first; middles that are too large or
+		 *  too different degrade to a plain replace block instead of hanging. */
+		function fpDiffLines(a, b) {
+			const n = a.length, m = b.length;
+			let start = 0;
+			while (start < n && start < m && a[start] === b[start]) start += 1;
+			let endA = n, endB = m;
+			while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA -= 1; endB -= 1; }
+			const steps = [];
+			for (let i = 0; i < start; i += 1) steps.push({ t: "eq", oldNo: i + 1, newNo: i + 1, text: a[i] });
+			fpDiffMiddle(a, b, start, endA, endB, steps);
+			const suffixLen = n - endA; // === m - endB
+			for (let j = 0; j < suffixLen; j += 1) steps.push({ t: "eq", oldNo: endA + j + 1, newNo: endB + j + 1, text: a[endA + j] });
+			return steps;
+		}
+		function fpDiffMiddle(a, b, from, endA, endB, out) {
+			const n = endA - from, m = endB - from;
+			if (n === 0 && m === 0) return;
+			const emitReplace = () => {
+				for (let i = 0; i < n; i += 1) out.push({ t: "del", oldNo: from + i + 1, newNo: 0, text: a[from + i] });
+				for (let j = 0; j < m; j += 1) out.push({ t: "ins", oldNo: 0, newNo: from + j + 1, text: b[from + j] });
+			};
+			// Guards: keep time (O((n+m)·D)) and trace memory bounded.
+			if (n + m > 8000 || n * m > 1000000) { emitReplace(); return; }
+			const max = n + m;
+			const MAX_D = 256;
+			const size = 2 * max + 1;
+			const v = new Int32Array(size);
+			const trace = [];
+			let depth = -1;
+			let done = false;
+			for (let d = 0; d <= max && !done; d += 1) {
+				if (d > MAX_D) { emitReplace(); return; }
+				trace.push(v.slice());
+				depth = d;
+				for (let k = -d; k <= d; k += 2) {
+					let x;
+					if (k === -d || (k !== d && v[k - 1 + max] < v[k + 1 + max])) x = v[k + 1 + max];
+					else x = v[k - 1 + max] + 1;
+					let y = x - k;
+					while (x < n && y < m && a[from + x] === b[from + y]) { x += 1; y += 1; }
+					v[k + max] = x;
+					if (x >= n && y >= m) { done = true; break; }
+				}
+			}
+			if (!done) { emitReplace(); return; }
+			// Backtrack the edit sequence (inserts/deletes only). Each depth
+			// contributes one edit possibly followed by a diagonal snake, which
+			// must be peeled before classifying the edit itself.
+			let x = n, y = m;
+			const ops = [];
+			for (let d = depth; d > 0; d -= 1) {
+				const vd = trace[d];
+				const k = x - y;
+				let prevK;
+				if (k === -d || (k !== d && vd[k - 1 + max] < vd[k + 1 + max])) prevK = k + 1;
+				else prevK = k - 1;
+				const prevX = vd[prevK + max];
+				const prevY = prevX - prevK;
+				while (x > prevX && y > prevY) { x -= 1; y -= 1; } // snake peel
+				ops.push(x === prevX ? "ins" : "del");
+				x = prevX; y = prevY;
+			}
+			ops.reverse();
+			// Replay forward: equal diagonals between edits become 'eq' steps.
+			let oi = 0, ni = 0;
+			const emitEq = () => {
+				while (oi < n && ni < m && a[from + oi] === b[from + ni]) {
+					out.push({ t: "eq", oldNo: from + oi + 1, newNo: from + ni + 1, text: a[from + oi] });
+					oi += 1; ni += 1;
+				}
+			};
+			emitEq();
+			for (const op of ops) {
+				if (op === "del") { out.push({ t: "del", oldNo: from + oi + 1, newNo: 0, text: a[from + oi] }); oi += 1; }
+				else { out.push({ t: "ins", oldNo: 0, newNo: from + ni + 1, text: b[from + ni] }); ni += 1; }
+				emitEq();
+			}
+		}
+		/** Align diff steps into side-by-side rows; consecutive delete/insert runs
+		 *  pair up row-wise (IDEA shows such pairs as aligned modified lines). */
+		function fpDiffRows(steps) {
+			const rows = [];
+			let i = 0;
+			while (i < steps.length) {
+				const s = steps[i];
+				if (s.t === "eq") {
+					rows.push({ kind: "ctx", left: { no: s.oldNo, text: s.text }, right: { no: s.newNo, text: s.text } });
+					i += 1;
+					continue;
+				}
+				const dels = [], inss = [];
+				while (i < steps.length && steps[i].t !== "eq") {
+					if (steps[i].t === "del") dels.push(steps[i]);
+					else inss.push(steps[i]);
+					i += 1;
+				}
+				const len = Math.max(dels.length, inss.length);
+				for (let j = 0; j < len; j += 1) {
+					rows.push({
+						kind: "change",
+						left: j < dels.length ? { no: dels[j].oldNo, text: dels[j].text } : null,
+						right: j < inss.length ? { no: inss[j].newNo, text: inss[j].text } : null,
+					});
+				}
+			}
+			return rows;
+		}
+		/** Word-level LCS inside one modified pair → per-side highlighted
+		 *  segments [{text, hl}], or null when the pair should stay whole-line. */
+		function fpInlineDiff(a, b) {
+			if (a === b || a === "" || b === "") return null;
+			if (a.length * b.length > 60000) return null;
+			const ta = a.match(/\S+|\s+/g) ?? [];
+			const tb = b.match(/\S+|\s+/g) ?? [];
+			const n = ta.length, m = tb.length;
+			if (n * m > 40000) return null;
+			const W = m + 1;
+			const dp = new Uint32Array((n + 1) * W);
+			for (let i = n - 1; i >= 0; i -= 1) {
+				for (let j = m - 1; j >= 0; j -= 1) {
+					dp[i * W + j] = ta[i] === tb[j]
+						? dp[(i + 1) * W + j + 1] + 1
+						: Math.max(dp[(i + 1) * W + j], dp[i * W + j + 1]);
+				}
+			}
+			const left = [], right = [];
+			const push = (arr, text, hl) => {
+				const last = arr[arr.length - 1];
+				if (last !== undefined && last.hl === hl) last.text += text;
+				else arr.push({ text, hl });
+			};
+			let i = 0, j = 0;
+			while (i < n && j < m) {
+				if (ta[i] === tb[j]) { push(left, ta[i], false); push(right, tb[j], false); i += 1; j += 1; }
+				else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) { push(left, ta[i], true); i += 1; }
+				else { push(right, tb[j], true); j += 1; }
+			}
+			while (i < n) { push(left, ta[i], true); i += 1; }
+			while (j < m) { push(right, tb[j], true); j += 1; }
+			return { left, right };
+		}
+		/** Build the renderable side-by-side model from one /__codex/git-diff
+		 *  body: aligned rows (with word-level highlights on modified pairs) +
+		 *  the hunk start indices the ↑/↓ change-navigation jumps between. */
+		function fpBuildDiffModel(body) {
+			if (body.binary === true || body.tooLarge === true) return { body, rows: [], hunks: [] };
+			const steps = fpDiffLines(fpSplitLines(body.oldContent ?? ""), fpSplitLines(body.newContent ?? ""));
+			const rows = fpDiffRows(steps);
+			const hasChanges = rows.some((r) => r.kind === "change");
+			const truncated = rows.length > FP_MAX_LINES;
+			const shown = truncated ? rows.slice(0, FP_MAX_LINES) : rows;
+			for (const row of shown) {
+				if (row.kind !== "change" || row.left === null || row.right === null) continue;
+				const inline = fpInlineDiff(row.left.text, row.right.text);
+				if (inline !== null) { row.left.segs = inline.left; row.right.segs = inline.right; }
+			}
+			// One hunk = one contiguous run of change rows (IDEA-style jump targets).
+			const hunks = [];
+			for (let i = 0; i < shown.length; i += 1) {
+				if (shown[i].kind === "change" && (i === 0 || shown[i - 1].kind !== "change")) hunks.push(i);
+			}
+			return { body, rows: shown, truncated, hasChanges, hunks };
+		}
+
+		function fpStatusPanel(icon, title, detail) {
+			return h("div", { className: "ccx-fp-status" },
+				h("span", { className: "ccx-fp-status-icon" }, icon),
+				h("span", null, title),
+				detail !== undefined && detail !== null ? detail : null,
+			);
+		}
+
+		// ── IDEA-style two-pane diff rendering ──
+		const DIFF_KIND_LABEL = { modified: "修改", added: "新增", deleted: "删除", untracked: "未跟踪" };
+		function fpDiffCellPair(cell, mode) {
+			// mode: "ctx" | "del" | "ins"; a null cell renders as filler.
+			if (cell === null) {
+				return [
+					h("td", { key: "n", className: "ccx-diff-no pad" }, "\u00A0"),
+					h("td", { key: "c", className: "ccx-diff-code pad" }, "\u00A0"),
+				];
+			}
+			const mark = mode === "ctx" ? "" : " " + mode;
+			const content = Array.isArray(cell.segs)
+				? cell.segs.map((seg, si) => seg.hl
+					? h("span", { key: si, className: mode === "del" ? "ccx-diff-hl-del" : "ccx-diff-hl-ins" }, seg.text)
+					: seg.text)
+				: (cell.text === "" ? "\u00A0" : cell.text);
+			return [
+				h("td", { key: "n", className: "ccx-diff-no" + mark }, cell.no),
+				h("td", { key: "c", className: "ccx-diff-code" + mark }, content),
+			];
+		}
+		function fpRenderDiffRow(row, idx) {
+			if (row.kind === "ctx") {
+				const L = fpDiffCellPair(row.left, "ctx");
+				const R = fpDiffCellPair(row.right, "ctx");
+				return h("tr", { key: idx, "data-ix": idx }, L[0], L[1], R[0], R[1]);
+			}
+			const L = fpDiffCellPair(row.left, "del");
+			const R = fpDiffCellPair(row.right, "ins");
+			return h("tr", { key: idx, "data-ix": idx }, L[0], L[1], R[0], R[1]);
+		}
+		/** Scroll the diff pane so the target row sits a little below the top
+		 *  edge (a few context lines stay visible, IDEA-style). */
+		function fpScrollToRow(sc, tr, behavior) {
+			const scRect = sc.getBoundingClientRect();
+			const trRect = tr.getBoundingClientRect();
+			const inset = Math.min(84, Math.floor(sc.clientHeight * 0.16));
+			const top = sc.scrollTop + (trRect.top - scRect.top) - inset;
+			sc.scrollTo({ top: Math.max(0, top), behavior: behavior ?? "smooth" });
+		}
+		function fpRenderDiffBody(model, scrollRef) {
+			if (model === null) return fpStatusPanel("⏳", "正在加载…");
+			const body = model.body;
+			if (body.tooLarge === true) return fpStatusPanel("📦", "文件过大（" + fpFormatBytes(body.size) + "）", "超出对比上限，暂不提供差异渲染。");
+			if (body.binary === true) return fpStatusPanel("🧩", "二进制文件", "内容无法以文本形式对比。");
+			if (model.hasChanges === false) return fpStatusPanel("✅", "没有差异", "两侧内容完全一致（变更可能已被还原）。");
+			const leftLabel = body.kind === "added" || body.kind === "untracked"
+				? "（无旧版本）"
+				: (body.oldLabel ?? "HEAD") + " · 旧版本";
+			const rightLabel = body.kind === "deleted"
+				? "（已删除）"
+				: (body.newLabel ?? "工作区") + " · 新版本";
+			return h(React.Fragment, null,
+				h("div", { className: "ccx-diff-bar" },
+					h("span", null, leftLabel),
+					h("span", null, rightLabel)),
+				h("div", { className: "ccx-diff-scroll", ref: scrollRef },
+					h("table", { className: "ccx-diff" },
+						h("colgroup", null,
+							h("col", { className: "ccx-diff-col-no" }),
+							h("col", { className: "ccx-diff-col-code" }),
+							h("col", { className: "ccx-diff-col-no" }),
+							h("col", { className: "ccx-diff-col-code" })),
+						h("tbody", null, model.rows.map(fpRenderDiffRow)))),
+				model.truncated === true
+					? h("div", { className: "ccx-diff-more" }, "差异过长，仅显示前 " + FP_MAX_LINES + " 行对比。")
+					: null);
+		}
+
 		/** Module-level preview state shared by the git card, the click
 		 *  interceptor and the sidebar panel. */
 		const filePreviewStore = {
-			state: { open: false, path: "", sessionId: undefined, cwd: "", nonce: 0 },
+			state: { open: false, path: "", diff: null, sessionId: undefined, cwd: "", nonce: 0 },
 			listeners: new Set(),
 			get() { return this.state; },
 			subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
@@ -78,7 +329,16 @@
 				if (cleaned === "") return;
 				// One right-hand panel at a time: the file-tree sidebar yields.
 				try { fileTreeStore.close(); } catch { /* tree region not loaded */ }
-				this.state = { ...this.state, open: true, path: cleaned, nonce: this.state.nonce + 1 };
+				this.state = { ...this.state, open: true, path: cleaned, diff: null, nonce: this.state.nonce + 1 };
+				this.emit();
+			},
+			/** Open the IDEA-style two-pane git diff for one changed file.
+			 *  `rel` is the workspace-relative path git itself reports. */
+			openDiff(path, rel) {
+				const cleaned = fpCleanPath(path);
+				if (cleaned === "" || rel === "") return;
+				try { fileTreeStore.close(); } catch { /* tree region not loaded */ }
+				this.state = { ...this.state, open: true, path: cleaned, diff: { rel }, nonce: this.state.nonce + 1 };
 				this.emit();
 			},
 			close() {
@@ -291,13 +551,6 @@
 			const writeClipboard = PRIM.writeClipboard;
 			const samplePageBg = () => ccxSamplePageBg(ctx);
 
-			function fpStatusPanel(icon, title, detail) {
-				return h("div", { className: "ccx-fp-status" },
-					h("span", { className: "ccx-fp-status-icon" }, icon),
-					h("span", null, title),
-					detail !== undefined && detail !== null ? detail : null,
-				);
-			}
 			function fpReadBlock(label, content, lang) {
 				const all = String(content).split("\n");
 				if (all.length > 0 && all[all.length - 1] === "") all.pop();
@@ -407,12 +660,37 @@
 				}, [state.open]);
 				// Fresh view mode per file.
 				useEffect(() => { setView("rendered"); setCopied(false); }, [state.path, state.nonce]);
-				// Load content.
+				// Load content (file preview) or both diff sides (git diff mode).
 				useEffect(() => {
 					if (!state.open) return undefined;
 					let alive = true;
 					setData({ status: "loading" });
 					const params = new URLSearchParams();
+					if (state.diff !== null) {
+						params.set("file", state.diff.rel);
+						if (state.cwd !== "") params.set("cwd", state.cwd);
+						else if (state.sessionId !== undefined) params.set("session", String(state.sessionId));
+						fetch("/__codex/git-diff?" + params.toString()).then(async (res) => {
+							const ctype = res.headers.get("content-type") ?? "";
+							if (!ctype.includes("application/json")) {
+								if (alive) setData({ status: "error", kind: res.status === 404 ? "route" : "http", code: res.status });
+								return;
+							}
+							const body = await res.json();
+							if (!alive) return;
+							if (!res.ok || body.error !== undefined) {
+								// "unknown codex-clone route" = the host half predates the
+								// /__codex/git-diff route and needs one dsh web restart.
+								const kind = body.error === "unknown codex-clone route" ? "route" : "other";
+								setData({ status: "error", kind, message: body.error });
+								return;
+							}
+							setData({ status: "ok", diffBody: body });
+						}).catch((error) => {
+							if (alive) setData({ status: "error", kind: "network", message: String(error?.message ?? error) });
+						});
+						return () => { alive = false; };
+					}
 					params.set("path", state.path);
 					if (state.cwd !== "") params.set("cwd", state.cwd);
 					else if (state.sessionId !== undefined) params.set("session", String(state.sessionId));
@@ -437,9 +715,48 @@
 						if (alive) setData({ status: "error", kind: "network", message: String(error?.message ?? error) });
 					});
 					return () => { alive = false; };
-				}, [state.open, state.path, state.nonce, state.cwd, state.sessionId]);
+				}, [state.open, state.path, state.diff, state.nonce, state.cwd, state.sessionId]);
+				// The two-pane comparison needs room: widen the panel on diff open
+				// (never shrink a width the user already chose).
+				useEffect(() => {
+					if (!state.open || state.diff === null) return;
+					setWidth((w) => {
+						if (w >= 780) return w;
+						return Math.max(780, Math.min(980, Math.floor(window.innerWidth * 0.8)));
+					});
+				}, [state.open, state.diff, state.nonce]);
+				// Side-by-side model: aligned rows, word-level highlights, hunks.
+				const diffModel = useMemo(() => {
+					if (state.diff === null || data === null || data.status !== "ok" || data.diffBody === undefined) return null;
+					return fpBuildDiffModel(data.diffBody);
+				}, [state.diff, data]);
+				// Change-hunk navigation: ↑/↓ buttons + initial jump to the first change.
+				const diffScrollRef = useRef(null);
+				const [hunkIx, setHunkIx] = useState(0);
+				const scrolledNonceRef = useRef(-1);
+				useEffect(() => { setHunkIx(0); }, [state.diff, state.nonce]);
+				useEffect(() => {
+					if (!state.open || state.diff === null || diffModel === null) return;
+					if (diffModel.hasChanges !== true || diffModel.hunks.length === 0) return;
+					if (scrolledNonceRef.current === state.nonce) return;
+					const sc = diffScrollRef.current;
+					if (sc === null) return;
+					scrolledNonceRef.current = state.nonce;
+					const tr = sc.querySelector('tr[data-ix="' + diffModel.hunks[0] + '"]');
+					if (tr !== null) fpScrollToRow(sc, tr, "auto");
+				}, [state.open, state.diff, state.nonce, diffModel]);
 
 				if (!state.open) return null;
+
+				const jumpHunk = (delta) => {
+					if (diffModel === null || diffModel.hunks.length === 0) return;
+					const sc = diffScrollRef.current;
+					if (sc === null) return;
+					const nextIx = Math.max(0, Math.min(diffModel.hunks.length - 1, hunkIx + delta));
+					setHunkIx(nextIx);
+					const tr = sc.querySelector('tr[data-ix="' + diffModel.hunks[nextIx] + '"]');
+					if (tr !== null) fpScrollToRow(sc, tr, "smooth");
+				};
 
 				const onResizeStart = (event) => {
 					event.preventDefault();
@@ -461,9 +778,15 @@
 					document.addEventListener("mousemove", onMove);
 					document.addEventListener("mouseup", onUp);
 				};
-				const displayPath = data?.status === "ok" ? data.body.path : state.path;
-				const isMarkdownFile = data?.status === "ok" && data.body.kind === "file" && fpIsMarkdown(data.body.path);
-				const sizeInfo = data?.status === "ok" && typeof data.body.size === "number" ? " · " + fpFormatBytes(data.body.size) : "";
+				const diffMode = state.diff !== null;
+				const okBody = !diffMode && data?.status === "ok" ? data.body : null;
+				const displayPath = okBody !== null ? okBody.path : state.path;
+				const isMarkdownFile = okBody !== null && okBody.kind === "file" && fpIsMarkdown(okBody.path);
+				const sizeInfo = okBody !== null && typeof okBody.size === "number" ? " · " + fpFormatBytes(okBody.size) : "";
+				const diffKind = diffMode && diffModel !== null ? String(diffModel.body.kind ?? "") : "";
+				const diffSubtitle = diffMode
+					? (diffModel !== null && typeof diffModel.body.file === "string" ? diffModel.body.file : state.path)
+					: displayPath + sizeInfo;
 				const onCopyPath = () => {
 					if (copied) return;
 					const doCopy = writeClipboard !== undefined
@@ -482,15 +805,18 @@
 					bodyNode = fpStatusPanel("⏳", "正在加载…", h("code", null, state.path));
 				} else if (data.status === "error") {
 					if (data.kind === "route") {
-						bodyNode = fpStatusPanel("🔌", "文件预览服务未就绪",
+						bodyNode = fpStatusPanel("🔌", diffMode ? "差异服务未就绪" : "文件预览服务未就绪",
 							h(React.Fragment, null,
-								h("span", null, "宿主路由 /__codex/file 尚未加载。"),
-								h("span", null, "重启一次 dsh web 服务即可启用内容预览。")));
+								h("span", null, "宿主路由 " + (diffMode ? "/__codex/git-diff" : "/__codex/file") + " 尚未加载。"),
+								h("span", null, "重启一次 dsh web 服务即可启用" + (diffMode ? "差异对比" : "内容预览") + "。")));
 					} else if (data.kind === "missing") {
 						bodyNode = fpStatusPanel("🫥", "文件不存在或已被删除", h("code", null, data.resolved ?? state.path));
 					} else {
 						bodyNode = fpStatusPanel("⚠️", "加载失败", h("code", null, data.message ?? ("HTTP " + (data.code ?? ""))));
 					}
+				} else if (diffMode) {
+					bodyNode = fpRenderDiffBody(diffModel, diffScrollRef);
+					flush = true;
 				} else {
 					const rendered = fpRenderBody(data, view, { cwd: state.cwd, sessionId: state.sessionId });
 					bodyNode = rendered.node;
@@ -498,9 +824,9 @@
 				}
 
 				return h("aside", {
-					className: "ccx-fp",
+					className: "ccx-fp" + (diffMode ? " ccx-fp-diff" : ""),
 					role: "complementary",
-					"aria-label": "文件预览",
+					"aria-label": diffMode ? "变更对比" : "文件预览",
 					style: panelBg !== ""
 						? { background: panelBg, "--ccx-fp-bg": panelBg }
 						: undefined,
@@ -509,16 +835,40 @@
 					h("div", { className: "ccx-fp-head" },
 						h("span", { className: "ccx-fp-icon" }, mentionIconReact("file")),
 						h("div", { className: "ccx-fp-title" },
-							h("span", { className: "ccx-fp-name" }, baseName(displayPath) || displayPath),
-							h("span", { className: "ccx-fp-path" }, displayPath + sizeInfo)),
+							h("span", { className: "ccx-fp-name" },
+								baseName(displayPath) || displayPath,
+								diffMode && diffKind !== "" ? h("span", { className: "ccx-diff-badge " + diffKind }, DIFF_KIND_LABEL[diffKind] ?? diffKind) : null,
+								diffMode && diffModel !== null && diffKind !== "untracked"
+									? h("span", { className: "ccx-diff-stats" },
+										h("span", { className: "ccx-git-add" }, "+" + (diffModel.body.added || 0)),
+										h("span", { className: "ccx-git-del" }, "−" + (diffModel.body.deleted || 0)))
+									: null),
+							h("span", { className: "ccx-fp-path" }, diffSubtitle)),
 						h("div", { className: "ccx-fp-actions" },
+							diffMode && diffModel !== null && diffModel.hunks.length > 0 ? h(React.Fragment, null,
+								h("span", { className: "ccx-diff-count", title: "当前修改处 / 修改处总数" },
+									(hunkIx + 1) + " / " + diffModel.hunks.length),
+								h("div", { className: "ccx-fp-seg ccx-diff-nav" },
+									h("button", {
+										type: "button", title: "上一个修改处", disabled: hunkIx <= 0,
+										onClick: () => jumpHunk(-1),
+									}, "↑"),
+									h("button", {
+										type: "button", title: "下一个修改处", disabled: hunkIx >= diffModel.hunks.length - 1,
+										onClick: () => jumpHunk(1),
+									}, "↓")))
+								: null,
+							diffMode ? h("button", {
+								type: "button", className: "ccx-fp-btn", title: "以普通预览打开当前文件",
+								onClick: () => filePreviewStore.open(state.path),
+							}, "预览文件") : null,
 							isMarkdownFile ? h("div", { className: "ccx-fp-seg" },
 								h("button", { type: "button", className: view === "rendered" ? "on" : "", onClick: () => setView("rendered") }, "渲染"),
 								h("button", { type: "button", className: view === "source" ? "on" : "", onClick: () => setView("source") }, "源码"),
 							) : null,
 							h("button", { type: "button", className: "ccx-fp-btn", onClick: onCopyPath }, copied ? "已复制" : "复制路径"),
 							h("button", { type: "button", className: "ccx-fp-btn", title: "关闭（Esc）", onClick: () => filePreviewStore.close() }, "✕"))),
-					h("div", { className: "ccx-fp-body" + (flush ? " flush" : "") }, bodyNode),
+					h("div", { className: "ccx-fp-body" + (diffMode ? " diff" : (flush ? " flush" : "")) }, bodyNode),
 				);
 			};
 		}
@@ -648,8 +998,8 @@
 							: stats.files.map((f) => h("div", {
 								key: f.file,
 								className: "ccx-git-file clickable",
-								title: f.file + " · 点击预览",
-								onClick: () => filePreviewStore.open(fpJoin(cwd, f.file)),
+								title: f.file + " · 点击对比变更",
+								onClick: () => filePreviewStore.openDiff(fpJoin(cwd, f.file), f.file),
 							},
 								h("span", { className: "ccx-git-file-path" }, f.file),
 								f.untracked === true

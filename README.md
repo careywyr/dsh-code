@@ -50,6 +50,9 @@ Codex 风格体验插件：Catppuccin 主题、壁纸等各种自定义外观设
     切换 tab 不丢失已加载内容与未保存草稿。与文件预览侧栏一样仅维持在当前会话：
     切换会话即自动关闭并清空标签页；两个右侧面板互斥，打开其一自动收起另一个。
     文件树与编辑区宽度均可左缘拖动调节，分别记忆在本地。
+12. **DeepSeek Harness 版本显示** — 设置 →「通用」分区最底部显示当前运行的
+    DeepSeek Harness（`@deepseek-ai/dsh`）版本号，便于确认实际生效的版本
+    （走宿主路由 `/__codex/version`，从运行进程的 dsh 安装树解析）。
 
 ![skills](docs/screenshots/dollar-skills.png)
 
@@ -90,6 +93,10 @@ node install.mjs   # 自动完成链接与注册（幂等，可重复执行）
   （打开其一自动收起另一个）。文件树走宿主路由 `/__codex/tree`、保存走
   `POST /__codex/file`、Markdown 图片走 `/__codex/raw`，因此**更新后需重启一次
   dsh web**；重启前会分别提示「文件树服务未就绪」「保存服务未就绪」。
+- **Harness 版本显示**：设置 →「通用」分区最底部一行显示当前 DeepSeek Harness
+  版本。版本号走宿主路由 `/__codex/version`（从运行进程所在 dsh 安装树解析
+  `@deepseek-ai/dsh` 的 `package.json`），因此**更新后需重启一次 dsh web**；
+  重启前该行会显示「未知」。
 
 ## 升级 dsh（npx 版本与缓存）
 
