@@ -22,3 +22,7 @@ curl -s -o /dev/null -w "%{http_code} %{content_type} %{size_download} bytes\n" 
 	"$BASE/__codex/raw?cwd=$(pwd)&path=docs/screenshots/home-mocha.png"
 echo "== 9. version route (running DeepSeek Harness version) =="
 curl -s -w " [HTTP %{http_code}]" "$BASE/__codex/version"; echo
+echo "== 10. feishu config route (appSecret must be masked, never plaintext) =="
+curl -s "$BASE/__codex/feishu/config" | head -c 300; echo
+echo "== 11. feishu status route =="
+curl -s "$BASE/__codex/feishu/status" | head -c 200; echo

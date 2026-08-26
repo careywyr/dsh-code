@@ -1880,110 +1880,6 @@
 		}
 		//#endregion
 
-		//#region AgentCard
-		function makeAgentCard(ctx) {
-			return function AgentCard(props) {
-				const sessionId = props.sessionId;
-				const catalog = props.useSessions((s) => (sessionId === undefined ? undefined : s.subagentsByParent?.[sessionId]));
-				const [open, setOpen] = useState(false);
-				const [isTrajectoryView, setIsTrajectoryView] = useState(false);
-				const rootRef = useRef(null);
-
-				// Detect if we're in trajectory view by checking the active tab
-				useEffect(() => {
-					const checkView = () => {
-						const allButtons = document.querySelectorAll('button, [role="tab"], [data-tab]');
-						let trajectoryActive = false;
-						for (const btn of allButtons) {
-							const text = (btn.textContent || "").trim();
-							if (text === "轨迹") {
-								const isActive = btn.classList.contains("active") ||
-									btn.classList.contains("on") ||
-									btn.getAttribute("aria-selected") === "true" ||
-									btn.getAttribute("data-active") === "true" ||
-									(btn.parentElement && btn.parentElement.querySelector(".active, .on") === btn);
-								if (isActive) {
-									trajectoryActive = true;
-									break;
-								}
-							}
-						}
-						if (!trajectoryActive) {
-							for (const btn of allButtons) {
-								const text = (btn.textContent || "").trim();
-								if (text === "对话") {
-									const isActive = btn.classList.contains("active") ||
-										btn.classList.contains("on") ||
-										btn.getAttribute("aria-selected") === "true" ||
-										btn.getAttribute("data-active") === "true" ||
-										(btn.parentElement && btn.parentElement.querySelector(".active, .on") === btn);
-									if (!isActive) {
-										const hasTrajectoryTab = Array.from(allButtons).some(b => (b.textContent || "").trim() === "轨迹");
-										if (hasTrajectoryTab) {
-											trajectoryActive = true;
-										}
-									}
-									break;
-								}
-							}
-						}
-						setIsTrajectoryView(trajectoryActive);
-					};
-					checkView();
-					const interval = setInterval(checkView, 300);
-					return () => clearInterval(interval);
-				}, []);
-
-				useEffect(() => {
-					if (!open) return;
-					const onDown = (event) => {
-						if (rootRef.current !== null && !rootRef.current.contains(event.target)) setOpen(false);
-					};
-					document.addEventListener("mousedown", onDown, true);
-					return () => document.removeEventListener("mousedown", onDown, true);
-				}, [open]);
-				// Hide in trajectory view
-				if (isTrajectoryView) return null;
-				const entries = (catalog?.entries ?? []).filter((e) => e.kind === "child");
-				if (entries.length === 0) return null;
-				const runningCount = entries.filter((e) => e.activity === "running").length;
-				const sessionsService = ctx.get("sessions");
-				const openChild = (entry) => {
-					if (sessionsService === undefined) return;
-					try {
-						sessionsService.openSubagent({ parentSessionId: sessionId, childSessionId: entry.id, mode: entry.mode });
-					} catch { /* navigation is best-effort */ }
-				};
-				return h("div", { className: "ccx-agents", ref: rootRef },
-					h("button", {
-						type: "button",
-						className: "ccx-agents-pill",
-						title: "本会话使用的子智能体",
-						onClick: () => setOpen((v) => !v),
-					},
-						h("span", null, "🤖"),
-						h("span", { className: "ccx-agents-count" }, String(entries.length)),
-						h("span", null, "智能体"),
-						runningCount > 0 ? h("span", { className: "ccx-agents-run", title: runningCount + " 个运行中" }) : null,
-					),
-					open ? h("div", { className: "ccx-agents-pop" },
-						h("div", { className: "ccx-git-pop-title" }, "子智能体 · " + entries.length + " 个" + (runningCount > 0 ? " · " + runningCount + " 运行中" : "")),
-						entries.map((entry) => h("button", {
-							key: entry.id,
-							type: "button",
-							className: "ccx-agent-row",
-							onClick: () => openChild(entry),
-						},
-							h("span", { className: "ccx-agent-dot" + (entry.activity === "running" ? " running" : "") }),
-							h("span", { className: "ccx-agent-label" }, entry.label ?? entry.id.slice(0, 8)),
-							h("span", { className: "ccx-agent-mode" }, entry.mode === "continuable" ? "可续" : "单次"),
-						)),
-					) : null,
-				);
-			};
-		}
-		//#endregion
-
 		//#region Pet
 		/** Module-level pet state store: a session-scoped bridge writes, the root-scoped widget reads. */
 		const petStore = {
@@ -2041,7 +1937,7 @@
 						children.forEach((child) => {
 							// Skip already moved or our own components
 							if (movedButtons.has(child)) return;
-							if (child.classList.contains("ccx-git-block") || child.classList.contains("ccx-agents")) return;
+							if (child.classList.contains("ccx-git-block")) return;
 							// Check if this looks like a download button
 							const isButton = child.tagName === "BUTTON" || child.querySelector("button") !== null;
 							const text = child.textContent || "";

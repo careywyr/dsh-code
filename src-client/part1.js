@@ -53,7 +53,7 @@ html.ccx-wide-chat .ccx-homecards {
 	margin: 0 var(--dsh-composer-side-clearance, 16px) !important;
 }
 html.ccx-wide-chat .ccx-cards-row {
-	right: 56px;
+	right: 44px;
 }
 /* ── home cards (input dock) ── */
 .ccx-homecards { display:flex; flex-direction:column; gap:10px; width:100%; max-width:var(--dsh-composer-card-max-width); margin:0 auto; padding:0 4px; position:relative; }
@@ -80,7 +80,7 @@ html.ccx-wide-chat .ccx-cards-row {
 /* ── git change card — visually positioned below tab bar via fixed positioning ── */
 .ccx-git-block { position:relative; display:flex; flex-direction:column; gap:6px; padding:8px 10px; border-radius:10px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 92%, transparent); backdrop-filter:blur(8px); font-size:11px; }
 /* Cards row: use fixed positioning to place below tab bar, top-right of conversation area */
-.ccx-cards-row { position:fixed; top:80px; right:24px; z-index:50; display:flex; gap:6px; pointer-events:auto; }
+.ccx-cards-row { position:fixed; top:80px; right:12px; z-index:50; display:flex; gap:6px; pointer-events:auto; }
 /* Hide the input dock slot's default spacing when cards are fixed */
 .ccx-cards-row:empty { display:none; }
 .ccx-git-block-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
@@ -184,20 +184,6 @@ html.ccx-wide-chat .ccx-cards-row {
 .ccx-weekbar { flex:1; min-width:6px; max-width:26px; border-radius:3px 3px 0 0; background:var(--dsw-alias-state-business-primary); opacity:.85; position:relative; cursor:pointer; transition:opacity .12s; }
 .ccx-weekbar:hover { opacity:1; }
 .ccx-cum-svg { width:100%; height:140px; }
-/* ── subagent card (session header utilities) ── */
-.ccx-agents { position:relative; display:flex; align-items:center; }
-.ccx-agents-pill { display:flex; align-items:center; gap:7px; height:28px; padding:0 10px; border-radius:9px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-secondary); font-size:12px; cursor:pointer; white-space:nowrap; transition:border-color .12s; }
-.ccx-agents-pill:hover { border-color:var(--dsw-alias-border-l4); }
-.ccx-agents-count { color:var(--dsw-alias-label-primary); font-weight:600; font-family:var(--ds-font-family-code); }
-.ccx-agents-run { width:7px; height:7px; border-radius:50%; background:var(--dsw-alias-state-success-primary); animation:ccx-pulse 1.2s ease-in-out infinite; }
-@keyframes ccx-pulse { 0%,100% { opacity:.4 } 50% { opacity:1 } }
-.ccx-agents-pop { position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:280px; max-width:400px; max-height:320px; overflow:auto; border-radius:12px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); box-shadow:var(--dsw-shadow-lv2, 0 8px 24px rgba(0,0,0,.18)); padding:8px; }
-.ccx-agent-row { display:flex; align-items:center; gap:8px; width:100%; padding:6px 8px; border:none; border-radius:8px; background:transparent; color:var(--dsw-alias-label-primary); font-size:12px; cursor:pointer; text-align:left; }
-.ccx-agent-row:hover { background:var(--dsw-alias-interactive-bg-hover); }
-.ccx-agent-dot { flex:none; width:7px; height:7px; border-radius:50%; background:var(--dsw-alias-label-dimmed); }
-.ccx-agent-dot.running { background:var(--dsw-alias-state-success-primary); animation:ccx-pulse 1.2s ease-in-out infinite; }
-.ccx-agent-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ccx-agent-mode { flex:none; font-size:10px; color:var(--dsw-alias-label-caption); border:1px solid var(--dsw-alias-border-l1); border-radius:5px; padding:0 5px; }
 /* ── pet widget (shell overlay) — Codex-style animated companion ── */
 .ccx-pet { position:fixed; z-index:90; pointer-events:auto; user-select:none; }
 .ccx-pet.dragging { cursor:grabbing; }
@@ -306,7 +292,7 @@ html.ccx-fp-open #root {
 /* No slide animation while the user drags the resize handle. */
 html.ccx-fp-resizing #root { transition: none; }
 /* Keep the floating cards row clear of the open panel. */
-html.ccx-fp-open .ccx-cards-row { right: calc(var(--ccx-fp-w, 540px) + 24px); }
+html.ccx-fp-open .ccx-cards-row { right: calc(var(--ccx-fp-w, 540px) + 12px); }
 /* The panel background is set inline from the theme's solid base color
    (wallpaper-safe: never the translucent override); --ccx-fp-bg mirrors it
    for nested surfaces like the sticky code banner. */
@@ -361,7 +347,7 @@ html.ccx-ft-open #root {
 /* No slide animation while the user drags a resize handle. */
 html.ccx-ft-resizing #root { transition: none; }
 /* Keep the floating cards row clear of the open dock. */
-html.ccx-ft-open .ccx-cards-row { right: calc(var(--ccx-ft-w, 280px) + var(--ccx-ft-ew, 0px) + 24px); }
+html.ccx-ft-open .ccx-cards-row { right: calc(var(--ccx-ft-w, 280px) + var(--ccx-ft-ew, 0px) + 12px); }
 /* Toggle button: fixed to the top-right corner; its vertical position is
    measured at runtime from the left sidebar's fold toggle so both sit at
    one height. */
@@ -497,6 +483,28 @@ table.ccx-diff { border-collapse:collapse; table-layout:fixed; width:100%; font-
 .ccx-diff-count { font-size:11px; color:var(--dsw-alias-label-caption); font-family:var(--ds-font-family-code, ui-monospace, monospace); white-space:nowrap; padding:0 1px; }
 .ccx-diff-nav button { min-width:26px; padding:4px 7px; font-size:13px; line-height:1; }
 .ccx-diff-nav button:disabled { opacity:.35; pointer-events:none; }
+/* ── feishu bot status widget (sidebar footer) ── */
+.ccx-feishu { display:flex; align-items:center; gap:8px; width:100%; height:38px; padding:0 10px 0 8px; margin:6px 0 0; border-radius:12px; border:none; background:transparent; box-sizing:border-box; font:inherit; font-size:13px; color:var(--dsw-alias-label-primary); cursor:default; }
+.ccx-feishu-icon { flex:none; display:grid; place-items:center; color:var(--dsw-alias-label-secondary); position:relative; }
+.ccx-feishu-dot { position:absolute; right:-2px; bottom:-2px; width:8px; height:8px; border-radius:50%; border:2px solid var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base)); box-sizing:content-box; }
+.ccx-feishu-dot.ok { background:var(--dsw-alias-state-success-primary); }
+.ccx-feishu-dot.warn { background:var(--dsw-alias-state-warn-primary); }
+.ccx-feishu-dot.err { background:var(--dsw-alias-state-error-primary); }
+.ccx-feishu-dot.off { background:var(--dsw-alias-label-caption); }
+.ccx-feishu-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:0; }
+.ccx-feishu-name { font-size:13px; font-weight:500; line-height:18px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ccx-feishu-state { font-size:11px; line-height:15px; color:var(--dsw-alias-label-caption); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ccx-feishu-state.err { color:var(--dsw-alias-state-error-primary); }
+/* toggle switch */
+.ccx-feishu-switch { position:relative; flex:none; width:32px; height:19px; border-radius:10px; border:none; background:var(--dsw-alias-border-l2); cursor:pointer; padding:0; transition:background .15s; }
+.ccx-feishu-switch.on { background:var(--dsw-alias-state-business-primary); }
+.ccx-feishu-switch:disabled { opacity:.5; cursor:default; }
+.ccx-feishu-knob { position:absolute; top:2px; left:2px; width:15px; height:15px; border-radius:50%; background:#fff; transition:left .15s; pointer-events:none; }
+.ccx-feishu-switch.on .ccx-feishu-knob { left:15px; }
+/* collapsed rail: icon-only round button */
+.ccx-feishu.rail { width:36px; height:36px; margin:0; padding:0; justify-content:center; border-radius:50%; cursor:pointer; }
+.ccx-feishu.rail:hover { background:var(--dsw-alias-interactive-bg-hover); }
+.ccx-feishu.rail .ccx-feishu-dot { border-width:1px; }
 `;
 		function installStyles() {
 			if (typeof document === "undefined") return () => {};

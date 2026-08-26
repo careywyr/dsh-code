@@ -296,6 +296,309 @@
 		}
 		//#endregion
 
+		//#region FeishuSection
+		const FEISHU_DEFAULT_DRAFT = {
+			enabled: false,
+			appId: "",
+			appSecret: "",
+			targets: [],
+			allowedOpenIds: [],
+			pushOn: { turnEnd: true, approval: true, question: true, error: true },
+			pushFormat: "card",
+			replyMaxChars: 2000,
+		};
+		const FEISHU_STATE_LABEL = {
+			idle: "未启动", connecting: "连接中…", connected: "已连接",
+			reconnecting: "重连中…", restarting: "重启中…", error: "连接出错", stopped: "已停止",
+		};
+		/** Feishu bot settings + status console (host-backed: the credentials and
+		 *  the long connection live in the dsh process, not in the browser). */
+		function makeFeishuSection() {
+			return function FeishuSection() {
+				const [draft, setDraft] = useState(null); // null = loading
+				const [loadError, setLoadError] = useState("");
+				const [status, setStatus] = useState(null);
+				const [busy, setBusy] = useState("");
+				const [notice, setNotice] = useState(null); // { ok, text }
+
+				const loadConfig = async () => {
+					try {
+						const res = await fetch("/__codex/feishu/config");
+						if (!res.ok) {
+							setDraft(null);
+							setLoadError(res.status === 404 || res.status === 503 ? "飞书服务未就绪：请重启 dsh web 后再配置" : "配置读取失败（HTTP " + res.status + "）");
+							return;
+						}
+						const data = await res.json();
+						const cfg = { ...FEISHU_DEFAULT_DRAFT, ...(data.config ?? {}) };
+						cfg.targets = Array.isArray(cfg.targets) ? cfg.targets : [];
+						cfg.allowedOpenIds = Array.isArray(cfg.allowedOpenIds) ? cfg.allowedOpenIds : [];
+						cfg.pushOn = { ...FEISHU_DEFAULT_DRAFT.pushOn, ...(cfg.pushOn ?? {}) };
+						setDraft(cfg);
+						setLoadError("");
+					} catch {
+						setDraft(null);
+						setLoadError("飞书服务未就绪：请重启 dsh web 后再配置");
+					}
+				};
+				const loadStatus = async () => {
+					try {
+						const res = await fetch("/__codex/feishu/status");
+						if (res.ok) setStatus(await res.json());
+					} catch { /* route not up yet */ }
+				};
+				useEffect(() => {
+					void loadConfig();
+					void loadStatus();
+					const timer = setInterval(loadStatus, 15000);
+					return () => clearInterval(timer);
+				}, []);
+
+				const set = (patch) => setDraft((prev) => ({ ...prev, ...patch }));
+				const save = async () => {
+					if (draft === null) return;
+					setBusy("save");
+					setNotice(null);
+					try {
+						const payload = {
+							config: {
+								...draft,
+								allowedOpenIds: draft.allowedOpenIds,
+							},
+						};
+						const res = await fetch("/__codex/feishu/config", {
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify(payload),
+						});
+						const data = await res.json().catch(() => ({}));
+						if (res.ok) {
+							setNotice({ ok: true, text: "已保存" + (draft.enabled && draft.appId && draft.appSecret ? "，机器人正在重连生效" : "") });
+							if (data.config) setDraft({ ...draft, appSecret: data.config.appSecret });
+							void loadStatus();
+						} else {
+							setNotice({ ok: false, text: data.error ?? "保存失败（HTTP " + res.status + "）" });
+						}
+					} catch (error) {
+						setNotice({ ok: false, text: "保存失败：" + String(error?.message ?? error) });
+					}
+					setBusy("");
+				};
+				const sendTest = async () => {
+					setBusy("test");
+					setNotice(null);
+					try {
+						const res = await fetch("/__codex/feishu/test", { method: "POST" });
+						const data = await res.json().catch(() => ({}));
+						if (data.ok === true) {
+							const failed = (data.results ?? []).filter((r) => r.ok !== true);
+							setNotice(failed.length === 0
+								? { ok: true, text: "测试消息已发送到全部目标" }
+								: { ok: false, text: "部分目标发送失败：" + failed.map((f) => f.error).join("；") });
+						} else {
+							setNotice({ ok: false, text: data.error ?? "发送失败" });
+						}
+					} catch (error) {
+						setNotice({ ok: false, text: "发送失败：" + String(error?.message ?? error) });
+					}
+					setBusy("");
+				};
+
+				if (draft === null) {
+					return h("div", { className: "ccx-section" },
+						h("div", { className: "ccx-note" }, loadError !== "" ? loadError : "正在加载飞书配置…"));
+				}
+
+				const targets = draft.targets;
+				const setTarget = (index, patch) => {
+					const next = targets.slice();
+					next[index] = { ...next[index], ...patch };
+					set({ targets: next });
+				};
+				const pushOnRow = (key, label) => h("label", { key, className: "ccx-note", style: { display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" } },
+					h("input", {
+						type: "checkbox",
+						checked: draft.pushOn[key] === true,
+						onChange: (e) => set({ pushOn: { ...draft.pushOn, [key]: e.target.checked } }),
+					}),
+					label);
+				const bot = status?.bot ?? null;
+				const stateLabel = FEISHU_STATE_LABEL[bot?.state] ?? "未启用";
+				const conn = bot?.connection ?? null;
+
+				return h("div", { className: "ccx-section" },
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "接入凭据"),
+						h("label", { className: "ccx-note", style: { display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" } },
+							h("input", { type: "checkbox", checked: draft.enabled === true, onChange: (e) => set({ enabled: e.target.checked }) }),
+							"启用飞书机器人"),
+						h("div", { className: "ccx-row" },
+							h("input", { className: "ccx-input", style: { flex: "1 1 220px" }, placeholder: "App ID（cli_ 开头）", value: draft.appId, onChange: (e) => set({ appId: e.target.value }) }),
+							h("input", { className: "ccx-input", style: { flex: "1 1 260px" }, type: "password", placeholder: draft.appSecret !== "" ? "已保存（留空保持不变）" : "App Secret", value: draft.appSecret.startsWith("•") ? "" : draft.appSecret, onChange: (e) => set({ appSecret: e.target.value }) })),
+						h("div", { className: "ccx-group-hint" }, "飞书开放平台 → 企业自建应用 → 凭证与基础信息；应用需开启机器人能力，事件订阅选择「使用长连接接收事件」并添加 im.message.receive_v1 事件，开通 im:message 权限。")),
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "推送目标"),
+						h("div", { className: "ccx-group-hint" }, "任务状态会推送到这里列出的用户或群聊。用户填 open_id，群聊填 chat_id（机器人需已加入该群）。"),
+						targets.map((target, index) => h("div", { key: index, className: "ccx-row" },
+							h("select", { className: "ccx-input", style: { width: "92px" }, value: target.kind === "chat" ? "chat" : "user", onChange: (e) => setTarget(index, { kind: e.target.value }) },
+								h("option", { value: "user" }, "用户"),
+								h("option", { value: "chat" }, "群聊")),
+							h("input", { className: "ccx-input", style: { flex: "1 1 200px" }, placeholder: target.kind === "chat" ? "oc_ 开头的群 chat_id" : "ou_ 开头的 open_id", value: target.id ?? "", onChange: (e) => setTarget(index, { id: e.target.value }) }),
+							h("input", { className: "ccx-input", style: { flex: "0 1 140px" }, placeholder: "备注（可选）", value: target.label ?? "", onChange: (e) => setTarget(index, { label: e.target.value }) }),
+							h("button", { type: "button", className: "ccx-iconbtn", title: "删除该目标", onClick: () => set({ targets: targets.filter((_, i) => i !== index) }) }, "✕"))),
+						h("div", { className: "ccx-row" },
+							h("button", { type: "button", className: "ccx-btn", onClick: () => set({ targets: [...targets, { kind: "user", id: "", label: "" }] }) }, "+ 添加用户"),
+							h("button", { type: "button", className: "ccx-btn", onClick: () => set({ targets: [...targets, { kind: "chat", id: "", label: "" }] }) }, "+ 添加群聊"))),
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "操作白名单"),
+						h("div", { className: "ccx-group-hint" }, "允许通过飞书操控 DeepSeek Harness 的用户 open_id，每行一个。白名单为空时任何人都无法操控（发 /id 给机器人可查询自己的 open_id）。"),
+						h("textarea", {
+							className: "ccx-input",
+							style: { width: "100%", minHeight: "64px", height: "auto", padding: "8px 12px", fontFamily: "var(--ds-font-family-code, monospace)", lineHeight: "20px", resize: "vertical" },
+							placeholder: "ou_xxxxxxxx（每行一个）",
+							value: draft.allowedOpenIds.join("\n"),
+							onChange: (e) => set({ allowedOpenIds: e.target.value.split("\n").map((s) => s.trim()).filter((s) => s !== "") }),
+						})),
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "推送事件"),
+						h("div", { className: "ccx-row" },
+							pushOnRow("turnEnd", "任务结束（最后一条回复）"),
+							pushOnRow("approval", "需要权限审批"),
+							pushOnRow("question", "等待回答问题"),
+							pushOnRow("error", "任务出错"))),
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "推送形态"),
+						h("div", { className: "ccx-row" },
+							h("select", { className: "ccx-input", style: { width: "180px" }, value: draft.pushFormat === "post" ? "post" : "card", onChange: (e) => set({ pushFormat: e.target.value }) },
+								h("option", { value: "card" }, "Markdown 卡片（推荐）"),
+								h("option", { value: "post" }, "富文本")),
+						),
+						h("div", { className: "ccx-group-hint" }, "Markdown 卡片可渲染代码块/列表/加粗，适合展示助手的回复；富文本为纯文本样式，兼容性最好。")),
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "推送正文长度"),
+						h("div", { className: "ccx-row" },
+							h("input", { className: "ccx-input", style: { width: "110px" }, type: "number", min: 200, max: 20000, step: 100, value: draft.replyMaxChars, onChange: (e) => set({ replyMaxChars: Number(e.target.value) || 2000 }) }),
+							h("span", { className: "ccx-note" }, "字符，超出部分截断"))),
+					h("div", { className: "ccx-row" },
+						h("button", { type: "button", className: "ccx-btn primary", onClick: save, disabled: busy !== "" }, busy === "save" ? "保存中…" : "保存"),
+						h("button", { type: "button", className: "ccx-btn", onClick: sendTest, disabled: busy !== "" }, busy === "test" ? "发送中…" : "发送测试消息"),
+						notice !== null ? h("span", { className: "ccx-note", style: notice.ok ? { color: "var(--dsw-alias-state-success-primary)" } : { color: "var(--dsw-alias-state-error-primary)" } }, notice.text) : null),
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "运行状态"),
+						h("div", { className: "ccx-note" },
+							bot === null
+								? (draft.enabled === true ? "未运行：请检查凭据是否已保存" : "未启用")
+								: [
+									"状态：" + stateLabel,
+									conn !== null && conn.state !== undefined ? " · 长连接：" + conn.state + (conn.reconnectAttempts > 0 ? "（重连 " + conn.reconnectAttempts + " 次）" : "") : "",
+									" · 已发送 " + (bot.sent ?? 0) + " 条 · 已接收 " + (bot.received ?? 0) + " 条",
+									(bot.pendingApprovals ?? 0) + (bot.pendingQuestions ?? 0) > 0 ? " · 待处理审批 " + bot.pendingApprovals + " / 提问 " + bot.pendingQuestions : "",
+								].join("")),
+						bot !== null && bot.lastError ? h("div", { className: "ccx-note", style: { color: "var(--dsw-alias-state-error-primary)" } }, "最近错误：" + bot.lastError) : null),
+					h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "使用说明"),
+						h("div", { className: "ccx-note", style: { whiteSpace: "pre-line" } },
+							"配置并保存后，机器人通过飞书官方长连接接收消息（无需公网地址）。\n" +
+							"单聊里直接发文字即转发给「焦点会话」（等同在界面输入），任务结束后回复会自动推送回来，形成多轮对话。\n" +
+							"指令：/list 会话列表 · /use <序号> 切换焦点 · /new <内容> 新建会话 · /cancel 取消回合 · 批准/拒绝 处理审批 · 数字或选项文字 回答提问 · /id 查询 open_id · /help 帮助。\n" +
+							"群聊中需要 @机器人 才会响应；直接「回复」某条通知消息可自动定位上下文。")),
+				);
+			};
+		}
+		//#endregion
+
+		//#region FeishuStatusWidget
+		/** Small paper-plane icon for the sidebar Feishu widget. */
+		function FeishuIcon(props) {
+			const size = props.size ?? 17;
+			return h("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+				h("path", { d: "M22 2 11 13" }),
+				h("path", { d: "M22 2 15 22l-4-9-9-4Z" }));
+		}
+		/** Map (enabled, bot) into a dot color + human-readable state line. */
+		function feishuStateInfo(enabled, bot) {
+			if (enabled !== true) return { dot: "off", text: "未启用", err: false };
+			if (bot === null || bot === undefined) return { dot: "warn", text: "未运行（检查凭据）", err: false };
+			switch (bot.state) {
+				case "connected": return { dot: "ok", text: "已连接", err: false };
+				case "connecting": return { dot: "warn", text: "连接中…", err: false };
+				case "reconnecting": return { dot: "warn", text: "重连中…", err: false };
+				case "restarting": return { dot: "warn", text: "重启中…", err: false };
+				case "error": return { dot: "err", text: bot.lastError ? "出错：" + bot.lastError : "连接出错", err: true };
+				case "stopped": return { dot: "off", text: "已停止", err: false };
+				default: return { dot: "off", text: String(bot.state ?? "未知"), err: false };
+			}
+		}
+		/** Sidebar-footer widget: connection status light + enable/disable switch.
+		 *  Renders a full row when the sidebar is wide, an icon-only round button
+		 *  (click to toggle) when collapsed to the rail. */
+		function makeFeishuStatusWidget() {
+			return function FeishuStatusWidget(props) {
+				const wide = props.wide !== false;
+				const [status, setStatus] = useState(null); // { enabled, bot } | null
+				const [busy, setBusy] = useState(false);
+				useEffect(() => {
+					let alive = true;
+					const load = async () => {
+						try {
+							const res = await fetch("/__codex/feishu/status");
+							if (!res.ok) return;
+							const data = await res.json();
+							if (alive) setStatus({ enabled: data.enabled === true, bot: data.bot ?? null });
+						} catch { /* host route not up yet */ }
+					};
+					void load();
+					const timer = setInterval(load, 5000);
+					return () => { alive = false; clearInterval(timer); };
+				}, []);
+				const enabled = status?.enabled === true;
+				const info = feishuStateInfo(enabled, status?.bot);
+				const toggle = async () => {
+					if (busy) return;
+					setBusy(true);
+					try {
+						const res = await fetch("/__codex/feishu/enabled", {
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify({ enabled: !enabled }),
+						});
+						if (res.ok) setStatus((prev) => ({ enabled: !enabled, bot: prev?.bot ?? null }));
+					} catch { /* ignore */ }
+					setBusy(false);
+				};
+				if (!wide) {
+					return h("button", {
+						type: "button",
+						className: "ccx-feishu rail",
+						title: "飞书机器人：" + info.text + "（点击" + (enabled ? "关闭" : "开启") + "）",
+						"aria-pressed": enabled,
+						disabled: busy,
+						onClick: toggle,
+					},
+						h("span", { className: "ccx-feishu-icon" },
+							h(FeishuIcon, { size: 18 }),
+							h("span", { className: "ccx-feishu-dot " + info.dot })));
+				}
+				return h("div", { className: "ccx-feishu", title: "飞书机器人状态" },
+					h("span", { className: "ccx-feishu-icon" },
+						h(FeishuIcon, { size: 17 }),
+						h("span", { className: "ccx-feishu-dot " + info.dot })),
+					h("span", { className: "ccx-feishu-body" },
+						h("span", { className: "ccx-feishu-name" }, "飞书机器人"),
+						h("span", { className: "ccx-feishu-state" + (info.err ? " err" : "") }, status === null ? "加载中…" : info.text)),
+					h("button", {
+						type: "button",
+						className: "ccx-feishu-switch" + (enabled ? " on" : ""),
+						title: enabled ? "点击关闭飞书机器人" : "点击开启飞书机器人",
+						"aria-pressed": enabled,
+						disabled: busy,
+						onClick: toggle,
+					},
+						h("span", { className: "ccx-feishu-knob" })));
+			};
+		}
+		//#endregion
+
 		//#region apply
 		const CONFIG_STORAGE_KEY = "dsh-code:config:v1";
 		/** Pre-rename storage key; migrated once on first load, kept for upgrades. */
@@ -507,6 +810,7 @@
 			// Settings pages.
 			const AppearanceSection = makeAppearanceSection(ctx, config, useConfig);
 			const ProfileSection = makeProfileSection(ctx, config, useConfig);
+			const FeishuSection = makeFeishuSection();
 			ctx.effect(() => ctx.slots.inject("settings.section", () => ctx.slots.register({
 				name: "settings.section",
 				id: "codex-appearance",
@@ -519,6 +823,20 @@
 				order: 91,
 				label: () => "个人资料",
 			}, ProfileSection)), "dsh-code: profile settings");
+			ctx.effect(() => ctx.slots.inject("settings.section", () => ctx.slots.register({
+				name: "settings.section",
+				id: "codex-feishu",
+				order: 92,
+				label: () => "飞书机器人",
+			}, FeishuSection)), "dsh-code: feishu bot settings");
+
+			// Feishu bot status light + enable/disable switch at the sidebar footer.
+			const FeishuStatusWidget = makeFeishuStatusWidget();
+			ctx.effect(() => ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
+				name: "sidebar.footer.action",
+				id: "codex-feishu-status",
+				order: 50,
+			}, FeishuStatusWidget)), "dsh-code: feishu sidebar status widget");
 
 			// DeepSeek Harness version row at the bottom of the native General section.
 			const DshVersionItem = makeDshVersionItem(ctx);
@@ -537,14 +855,13 @@
 				order: -10,
 			}, HomeCards)), "dsh-code: home cards");
 
-			// Git change-stats card and Agent card - in input dock but visually positioned below tab bar.
+			// Git change-stats card - in input dock but visually positioned below tab bar.
+			// (The agents card was removed: the left sidebar already lists subagents.)
 			const GitCard = makeGitCard(ctx);
-			const AgentCard = makeAgentCard(ctx);
-			// Wrapper component to display both cards in a horizontal row
+			// Wrapper component to display cards in a horizontal row
 			function CardsRow(props) {
 				return h("div", { className: "ccx-cards-row" },
 					h(GitCard, props),
-					h(AgentCard, props),
 				);
 			}
 			// Register in conversation.input.dock (has session props) but use CSS to position visually

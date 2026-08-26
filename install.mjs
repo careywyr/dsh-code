@@ -14,6 +14,7 @@
  * automatically: legacy symlinks and the legacy patch row are removed before
  * the new `dsh-code` registration is applied.
  */
+import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -89,6 +90,26 @@ for (const dep of ['dsh-settings', 'schemastery', 'cordis']) {
 	ensureSymlink(link, target)
 }
 console.log('0) local dependency links ensured (node_modules/@deepseek-ai/*)')
+// 0.5) Real npm dependencies. Unlike the @deepseek-ai/* links above (resolved
+//      from the dsh install tree), @larksuiteoapi/node-sdk is a plain npm
+//      dependency of THIS package and must live in this node_modules. The
+//      feishu module imports it lazily, so a missing install only disables the
+//      bot instead of breaking the plugin — but we try to install it here.
+const FEISHU_SDK = path.join(PKG_DIR, 'node_modules', '@larksuiteoapi', 'node-sdk')
+if (!existsSync(FEISHU_SDK)) {
+	console.log('0.5) installing npm dependencies (@larksuiteoapi/node-sdk) …')
+	const result = spawnSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--cache', path.join(PKG_DIR, '.npm-cache')], {
+		cwd: PKG_DIR,
+		stdio: 'inherit',
+	})
+	if (result.status === 0 && existsSync(FEISHU_SDK)) {
+		console.log('0.5) npm dependencies installed')
+	} else {
+		console.warn('0.5) WARNING: npm install did not complete; run `npm install` in this directory manually to enable the Feishu bot.')
+	}
+} else {
+	console.log('0.5) npm dependencies already present (@larksuiteoapi/node-sdk)')
+}
 /** Remove a legacy (pre-rename) symlink if present; ignores anything that is not a symlink. */
 function removeLegacySymlink(link) {
 	if (lstatExists(link) && lstatSync(link).isSymbolicLink()) {

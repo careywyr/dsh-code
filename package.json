@@ -27,5 +27,8 @@
 		"catppuccin",
 		"codex"
 	],
+	"dependencies": {
+		"@larksuiteoapi/node-sdk": "^1.73.0"
+	},
 	"license": "MIT"
 }
