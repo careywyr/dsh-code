@@ -27,11 +27,37 @@
 			}
 			return { cells, max };
 		}
+		/** Keep a chart tooltip inside its container: clamp the anchored x so the
+		 *  bubble never overflows the left/right edges (right-most cells used to
+		 *  render it half cut off), and flip it below the anchor when there is no
+		 *  room above. Runs as a layout effect so the corrected position paints in
+		 *  the very first frame. */
+		function useClampedTooltip(tooltip, setTooltip, containerRef, tipRef) {
+			useLayoutEffect(() => {
+				if (tooltip === null || tooltip.clamped === true) return;
+				const tip = tipRef.current;
+				const box = containerRef.current;
+				if (tip === null || box === null) return;
+				const half = tip.offsetWidth / 2;
+				const minX = half + 2;
+				const maxX = Math.max(minX, box.clientWidth - half - 2);
+				const x = Math.min(Math.max(tooltip.x, minX), maxX);
+				let y = tooltip.y;
+				let below = tooltip.below === true;
+				if (!below && y - tip.offsetHeight < 4) {
+					below = true;
+					y = tooltip.anchorBottom;
+				}
+				setTooltip({ ...tooltip, x, y, below, clamped: true });
+			}, [tooltip]);
+		}
 		function DailyHeatmap({ daily }) {
 			const weeks = 52;
 			const { cells, max } = useMemo(() => buildDailyCells(daily, weeks), [daily]);
-			const [tooltip, setTooltip] = useState(null); // { x, y, iso, tokens }
+			const [tooltip, setTooltip] = useState(null); // { x, y, anchorBottom, iso, tokens }
 			const containerRef = useRef(null);
+			const tooltipRef = useRef(null);
+			useClampedTooltip(tooltip, setTooltip, containerRef, tooltipRef);
 			const children = [];
 			// month labels (bottom row)
 			let lastMonth = -1;
@@ -64,7 +90,8 @@
 							if (containerRect) {
 								setTooltip({
 									x: rect.left - containerRect.left + rect.width / 2,
-									y: rect.top - containerRect.top,
+									y: rect.top - containerRect.top - 6,
+									anchorBottom: rect.bottom - containerRect.top + 6,
 									iso: cell.iso,
 									tokens: cell.tokens,
 								});
@@ -78,7 +105,8 @@
 				children,
 				tooltip ? h("div", {
 					className: "ccx-tooltip visible",
-					style: { left: tooltip.x + "px", top: tooltip.y + "px", transform: "translate(-50%, -100%)" },
+					ref: tooltipRef,
+					style: { left: tooltip.x + "px", top: tooltip.y + "px", transform: tooltip.below === true ? "translate(-50%, 0)" : "translate(-50%, -100%)" },
 				},
 					h("span", { className: "ccx-tooltip-date" }, tooltip.iso),
 					" · ",
@@ -107,8 +135,10 @@
 				return out;
 			}, [daily]);
 			const max = Math.max(1, ...data.map((d) => d.tokens));
-			const [tooltip, setTooltip] = useState(null); // { x, y, iso, tokens }
+			const [tooltip, setTooltip] = useState(null); // { x, y, anchorBottom, iso, tokens }
 			const containerRef = useRef(null);
+			const tooltipRef = useRef(null);
+			useClampedTooltip(tooltip, setTooltip, containerRef, tooltipRef);
 			return h("div", { className: "ccx-weekbars ccx-tooltip-wrap", ref: containerRef },
 				data.map((d) => h("div", {
 					key: d.iso,
@@ -120,7 +150,8 @@
 						if (containerRect) {
 							setTooltip({
 								x: rect.left - containerRect.left + rect.width / 2,
-								y: rect.top - containerRect.top,
+								y: rect.top - containerRect.top - 6,
+								anchorBottom: rect.bottom - containerRect.top + 6,
 								iso: d.iso,
 								tokens: d.tokens,
 							});
@@ -130,7 +161,8 @@
 				})),
 				tooltip ? h("div", {
 					className: "ccx-tooltip visible",
-					style: { left: tooltip.x + "px", top: tooltip.y + "px", transform: "translate(-50%, -100%)" },
+					ref: tooltipRef,
+					style: { left: tooltip.x + "px", top: tooltip.y + "px", transform: tooltip.below === true ? "translate(-50%, 0)" : "translate(-50%, -100%)" },
 				},
 					h("span", { className: "ccx-tooltip-date" }, "周 " + tooltip.iso),
 					" · ",
@@ -189,10 +221,27 @@
 				);
 			};
 		}
+		/* Last stats payload is kept in localStorage (keyed by timezone offset) so
+		 * reopening the profile page paints real data instantly instead of "…"
+		 * while the host recomputes; the fresh fetch then quietly replaces it. */
+		const STATS_CACHE_KEY = "dsh-code:stats";
+		function statsTz() { return new Date().getTimezoneOffset(); }
+		function readStatsCache() {
+			try {
+				const raw = localStorage.getItem(STATS_CACHE_KEY);
+				if (raw === null) return null;
+				const parsed = JSON.parse(raw);
+				if (parsed === null || typeof parsed !== "object" || parsed.tz !== statsTz() || parsed.data === null || typeof parsed.data !== "object") return null;
+				return parsed.data;
+			} catch { return null; }
+		}
+		function writeStatsCache(data) {
+			try { localStorage.setItem(STATS_CACHE_KEY, JSON.stringify({ at: Date.now(), tz: statsTz(), data })); } catch { /* storage blocked/full */ }
+		}
 		function makeProfileSection(ctx, config, useConfig) {
 			return function ProfileSection() {
 				const cfg = useConfig();
-				const [stats, setStats] = useState(null);
+				const [stats, setStats] = useState(readStatsCache);
 				const [mode, setMode] = useState("daily");
 				const [nameDraft, setNameDraft] = useState(null);
 				const avatarRef = useRef(null);
@@ -200,10 +249,13 @@
 					let alive = true;
 					(async () => {
 						try {
-							const res = await fetch("/__codex/stats?tz=" + new Date().getTimezoneOffset());
+							const res = await fetch("/__codex/stats?tz=" + statsTz());
 							if (res.ok) {
 								const data = await res.json();
-								if (alive) setStats(data);
+								if (alive && data !== null && data.error === undefined) {
+									setStats(data);
+									writeStatsCache(data);
+								}
 							}
 						} catch { /* host route unavailable */ }
 					})();
@@ -211,8 +263,14 @@
 				}, []);
 				const refresh = async () => {
 					try {
-						const res = await fetch("/__codex/stats?tz=" + new Date().getTimezoneOffset() + "&r=" + Date.now());
-						if (res.ok) setStats(await res.json());
+						const res = await fetch("/__codex/stats?tz=" + statsTz() + "&r=" + Date.now());
+						if (res.ok) {
+							const data = await res.json();
+							if (data !== null && data.error === undefined) {
+								setStats(data);
+								writeStatsCache(data);
+							}
+						}
 					} catch { /* ignore */ }
 				};
 				const username = cfg.username ?? "";
@@ -604,7 +662,8 @@
 		/** Pre-rename storage key; migrated once on first load, kept for upgrades. */
 		const LEGACY_CONFIG_STORAGE_KEY = "dsh-codex-clone:config:v1";
 		const CONFIG_DEFAULTS = {
-			themeFlavor: "mocha",
+			lightFlavor: "latte",
+			darkFlavor: "mocha",
 			backgroundImage: "",
 			backgroundOpacity: 0.3,
 			username: "",
@@ -632,13 +691,30 @@
 				}
 			} catch { /* storage unavailable */ }
 		}
+		/**
+		 * Upgrade the legacy single `themeFlavor` field to per-scheme flavors
+		 * (one-time; the mode itself lives in the shell's theme preference).
+		 */
+		function migrateThemeConfig(value) {
+			if (value.themeFlavor === undefined) return value;
+			const legacy = value.themeFlavor;
+			const next = { ...value };
+			delete next.themeFlavor;
+			if (next.lightFlavor === undefined && next.darkFlavor === undefined) {
+				if (legacy === "latte") { next.lightFlavor = "latte"; next.darkFlavor = "mocha"; }
+				else if (legacy === "frappe" || legacy === "macchiato" || legacy === "mocha") { next.darkFlavor = legacy; next.lightFlavor = "latte"; }
+				else { next.lightFlavor = "light"; next.darkFlavor = "dark"; } // system / light / dark
+			}
+			return next;
+		}
 		function makeConfigStore() {
 			migrateLegacyConfigKey();
 			let value = { ...CONFIG_DEFAULTS };
 			try {
 				const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
-				if (raw !== null && raw !== "") value = { ...value, ...JSON.parse(raw) };
+				if (raw !== null && raw !== "") value = migrateThemeConfig({ ...value, ...JSON.parse(raw) });
 			} catch { /* corrupted or unavailable storage */ }
+			try { localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(value)); } catch { /* quota */ }
 			const listeners = new Set();
 			const notify = () => { for (const listener of [...listeners]) { try { listener(); } catch { /* listener error */ } } };
 			const persist = () => { try { localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(value)); } catch { /* quota */ } };
@@ -675,50 +751,62 @@
 			const configGetSnapshot = () => config.get();
 			const useConfig = () => useSyncExternalStore(configSubscribe, configGetSnapshot, configGetSnapshot);
 
-			// Register the four Catppuccin flavors.
-			for (const [id, flavor] of Object.entries(CATPPUCCIN)) {
-				ctx.effect(() => ctx.theme.register({
-					id,
-					colorScheme: flavor.scheme,
-					tokens: buildTokens(flavor.colors, flavor.scheme),
-				}), "dsh-code: theme " + id);
-			}
-
-			// Apply the persisted flavor (default mocha) whenever config changes.
-			// The ui-theme plugin re-adopts its persisted preference when its own
-			// settings scope finishes its initial async load, which can land AFTER
-			// our first setTheme; the backoff retries re-assert our flavor until
-			// that settle window closes.
+			// Per-scheme flavor palette. The shell owns the appearance mode
+			// (light / dark / follow-system — the General settings "外观" row and
+			// our own mode cubes both call ctx.theme.setTheme); we only paint each
+			// color scheme with its configured Catppuccin flavor, so switching the
+			// mode never loses a per-scheme selection. The built-in palettes live
+			// in `body{...}` / `body[data-ds-dark-theme]{...}` rules, so our rules
+			// use higher-specificity selectors scoped to the matching scheme.
 			ctx.effect(() => {
-				const applyFlavor = () => {
-					const flavor = config.get().themeFlavor ?? "mocha";
-					try {
-						ctx.theme.setTheme(flavor);
-					} catch (error) {
-						console.error("[dsh-code] setTheme failed", flavor, String(error));
-					}
+				if (typeof document === "undefined") return () => {};
+				const tag = document.createElement("style");
+				tag.dataset.plugin = "dsh-code";
+				tag.dataset.pluginCss = TAG_ID + ":flavor-palette";
+				document.head.appendChild(tag);
+				const body = document.body;
+				body.classList.add("ccx-flavor-light", "ccx-flavor-dark");
+				const tokensCss = (tokens) => Object.entries(tokens).map(([name, val]) => name + ":" + val + ";").join("");
+				const applyPalette = () => {
+					const cfgValue = config.get();
+					const light = CATPPUCCIN[cfgValue.lightFlavor ?? "latte"];
+					const dark = CATPPUCCIN[cfgValue.darkFlavor ?? "mocha"];
+					let css = "";
+					if (light !== undefined) css += "body.ccx-flavor-light:not([data-ds-dark-theme]){" + tokensCss(buildTokens(light.colors, "light")) + "}";
+					if (dark !== undefined) css += "body[data-ds-dark-theme].ccx-flavor-dark{" + tokensCss(buildTokens(dark.colors, "dark")) + "}";
+					tag.textContent = css;
 				};
-				applyFlavor();
-				const retries = [400, 1200, 3000].map((ms) => ctx.timeout(applyFlavor, ms));
-				const offConfig = config.subscribe(applyFlavor);
+				applyPalette();
+				const offConfig = config.subscribe(applyPalette);
 				return () => {
-					for (const dispose of retries) dispose();
 					offConfig();
+					tag.remove();
+					body.classList.remove("ccx-flavor-light", "ccx-flavor-dark");
 				};
-			}, "dsh-code: theme flavor preference");
+			}, "dsh-code: per-scheme flavor palette");
 
 			// Wallpaper: fixed background on <html> + translucent surface tokens.
 			let wallpaperDisposer = null;
 			let wallpaperKey = null;
 			ctx.effect(() => {
+				// Translucent surface value for one scheme: the configured Catppuccin
+				// flavor when set, otherwise the built-in palette's static color.
+				const BUILTIN_WALLPAPER_VARS = {
+					light: { base: "--dsw-static-neutral-bluish-00", sidebar: "--dsw-static-neutral-bluish-50" },
+					dark: { base: "--dsw-static-neutral-bluish-950", sidebar: "--dsw-static-neutral-bluish-900" },
+				};
+				const wallValue = (scheme, kind, hex, a) => hex !== null
+					? rgba(hex, a)
+					: "color-mix(in srgb, var(" + BUILTIN_WALLPAPER_VARS[scheme][kind] + ") " + Math.round(a * 100) + "%, transparent)";
 				const applyWallpaper = () => {
 					if (typeof document === "undefined") return;
 					const cfgValue = config.get();
 					const img = cfgValue.backgroundImage ?? "";
 					const opacity = Math.max(0.05, Math.min(0.9, Number(cfgValue.backgroundOpacity ?? 0.3)));
-					const activeId = ctx.theme.getTheme().active?.id;
+					const lightColors = CATPPUCCIN[cfgValue.lightFlavor ?? "latte"]?.colors ?? null;
+					const darkColors = CATPPUCCIN[cfgValue.darkFlavor ?? "mocha"]?.colors ?? null;
 					// Guard: overrideTokens re-emits theme/change; skip no-op reapplications.
-					const key = img + "|" + opacity + "|" + (img === "" ? "-" : activeId);
+					const key = img + "|" + opacity + "|" + (cfgValue.lightFlavor ?? "latte") + "|" + (cfgValue.darkFlavor ?? "mocha");
 					if (key === wallpaperKey) return;
 					wallpaperKey = key;
 					const html = document.documentElement;
@@ -736,26 +824,23 @@
 					html.style.backgroundAttachment = "fixed";
 					html.style.backgroundSize = "cover";
 					html.style.backgroundPosition = "center";
-					const flavor = CATPPUCCIN[activeId] ?? CATPPUCCIN.mocha;
-					const p = flavor.colors;
 					const surfaceAlpha = Math.max(0.35, 1 - opacity);
+					const sidebarAlpha = Math.min(1, surfaceAlpha + 0.12);
 					wallpaperDisposer = ctx.theme.overrideTokens("dsh-code-wallpaper", {
 						"--dsw-alias-bg-base": {
-							light: rgba(CATPPUCCIN.latte.colors.base, surfaceAlpha),
-							dark: rgba(p.base, surfaceAlpha),
+							light: wallValue("light", "base", lightColors?.base ?? null, surfaceAlpha),
+							dark: wallValue("dark", "base", darkColors?.base ?? null, surfaceAlpha),
 						},
 						"--dsw-specific-sidebar-fill": {
-							light: rgba(CATPPUCCIN.latte.colors.crust, Math.min(1, surfaceAlpha + 0.12)),
-							dark: rgba(p.mantle, Math.min(1, surfaceAlpha + 0.12)),
+							light: wallValue("light", "sidebar", lightColors?.crust ?? null, sidebarAlpha),
+							dark: wallValue("dark", "sidebar", darkColors?.mantle ?? null, sidebarAlpha),
 						},
 					});
 				};
 				applyWallpaper();
 				const offConfig = config.subscribe(applyWallpaper);
-				const offTheme = ctx.on("theme/change", applyWallpaper);
 				return () => {
 					offConfig();
-					offTheme();
 					if (wallpaperDisposer !== null) { wallpaperDisposer(); wallpaperDisposer = null; }
 					wallpaperKey = null;
 				};

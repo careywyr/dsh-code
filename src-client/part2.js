@@ -452,21 +452,18 @@
 		function ccxSamplePageBg(ctx) {
 			try {
 				const snap = ctx !== undefined && ctx.theme !== undefined && typeof ctx.theme.getTheme === "function" ? ctx.theme.getTheme() : undefined;
-				const active = snap?.active;
-				const registered = Array.isArray(snap?.themes) && active !== undefined
-					? snap.themes.find((t) => t.id === active.id)
-					: undefined;
-				let token = registered?.tokens?.["--dsw-alias-bg-base"];
-				if (token !== undefined && typeof token === "object" && token !== null) {
-					token = active?.colorScheme === "light" ? token.light : token.dark;
-				}
-				if (typeof token === "string" && token !== "") return token;
-				// Built-in light/dark themes register no tokens: use the static palette.
-				if (active !== undefined) {
-					const staticToken = active.colorScheme === "dark" ? "--dsw-static-neutral-bluish-950" : "--dsw-static-neutral-bluish-00";
-					const v = getComputedStyle(document.body).getPropertyValue(staticToken).trim();
-					if (v !== "") return v;
-				}
+				const scheme = snap?.active?.colorScheme === "light" ? "light" : "dark";
+				// The page surface is painted per scheme by the configured flavor
+				// (the flavor palette stylesheet); resolve its solid base color.
+				let cfgValue = {};
+				try { cfgValue = JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY) ?? "{}") ?? {}; } catch { /* storage unavailable */ }
+				const flavorId = scheme === "light" ? (cfgValue.lightFlavor ?? "latte") : (cfgValue.darkFlavor ?? "mocha");
+				const colors = CATPPUCCIN[flavorId]?.colors;
+				if (colors !== undefined) return colors.base;
+				// Built-in light/dark: use the static palette.
+				const staticToken = scheme === "dark" ? "--dsw-static-neutral-bluish-950" : "--dsw-static-neutral-bluish-00";
+				const v = getComputedStyle(document.body).getPropertyValue(staticToken).trim();
+				if (v !== "") return v;
 			} catch { /* fall through */ }
 			try {
 				const bg = getComputedStyle(document.body).backgroundColor;
@@ -1681,19 +1678,66 @@
 		//#endregion
 
 		//#region AppearanceSection
-		const FLAVOR_CHOICES = [
-			{ id: "system", label: "跟随系统", colors: null },
+		/**
+		 * Appearance mode cubes (light / dark / follow-system). The mode is owned
+		 * by the shell's theme service (the same preference the native General
+		 * settings "外观" row edits); each mode then paints with its own theme
+		 * picked below — Codex-style per-scheme theme selection.
+		 */
+		const MODE_CHOICES = [
+			{ id: "light", label: "浅色", dots: ["#ffffff", "#1e66f5", "#8c8fa1"] },
+			{ id: "dark", label: "深色", dots: ["#1e1e2e", "#89b4fa", "#7f849c"] },
+			{ id: "system", label: "跟随系统", dots: null },
+		];
+		/** Light-scheme theme choices (built-in light + Catppuccin light flavor). */
+		const LIGHT_THEME_CHOICES = [
 			{ id: "light", label: "内置浅色", colors: null },
-			{ id: "dark", label: "内置深色", colors: null },
 			{ id: "latte", label: "Latte", colors: CATPPUCCIN.latte.colors },
+		];
+		/** Dark-scheme theme choices (built-in dark + Catppuccin dark flavors). */
+		const DARK_THEME_CHOICES = [
+			{ id: "dark", label: "内置深色", colors: null },
 			{ id: "frappe", label: "Frappé", colors: CATPPUCCIN.frappe.colors },
 			{ id: "macchiato", label: "Macchiato", colors: CATPPUCCIN.macchiato.colors },
 			{ id: "mocha", label: "Mocha", colors: CATPPUCCIN.mocha.colors },
 		];
+		/** Live appearance mode (light/dark/system) mirrored from the theme service. */
+		function makeUseThemePreference(ctx) {
+			const normalize = (p) => (p === "light" || p === "dark" || p === "system" ? p : "system");
+			return function useThemePreference() {
+				const [pref, setPref] = useState(() => {
+					try { return normalize(ctx.theme.getTheme().preference); } catch { return "system"; }
+				});
+				useEffect(() => ctx.on("theme/change", (snap) => setPref(normalize(snap.preference))), []);
+				return pref;
+			};
+		}
 		function makeAppearanceSection(ctx, config, useConfig) {
+			const useThemePreference = makeUseThemePreference(ctx);
+			const themeCube = (choice, selectedId, onPick) => h("button", {
+				key: choice.id,
+				type: "button",
+				className: "ccx-cube" + (selectedId === choice.id ? " selected" : ""),
+				onClick: onPick,
+			},
+				h("span", { className: "ccx-cube-dots" },
+					choice.colors === null
+						? [
+							h("span", { key: "a", className: "ccx-cube-dot", style: { background: "linear-gradient(135deg,#eff1f5 50%,#1e1e2e 50%)" } }),
+							h("span", { key: "b", className: "ccx-cube-dot", style: { background: "#4169e1" } }),
+							h("span", { key: "c", className: "ccx-cube-dot", style: { background: "#888" } }),
+						]
+						: [
+							h("span", { key: "a", className: "ccx-cube-dot", style: { background: choice.colors.base, border: "1px solid " + choice.colors.surface2 } }),
+							h("span", { key: "b", className: "ccx-cube-dot", style: { background: choice.colors.blue } }),
+							h("span", { key: "c", className: "ccx-cube-dot", style: { background: choice.colors.mauve } }),
+						]),
+				h("span", null, choice.label));
 			return function AppearanceSection() {
 				const cfg = useConfig();
-				const flavor = cfg.themeFlavor ?? "mocha";
+				const mode = useThemePreference();
+				const lightFlavor = cfg.lightFlavor ?? "latte";
+				const darkFlavor = cfg.darkFlavor ?? "mocha";
 				const bg = cfg.backgroundImage ?? "";
 				const opacity = cfg.backgroundOpacity ?? 0.3;
 				const [urlDraft, setUrlDraft] = useState("");
@@ -1717,29 +1761,36 @@
 				};
 				return h("div", { className: "ccx-section" },
 					h("div", { className: "ccx-group" },
-						h("div", { className: "ccx-group-title" }, "主题 · Catppuccin"),
-						h("div", { className: "ccx-cubes" }, FLAVOR_CHOICES.map((choice) =>
+						h("div", { className: "ccx-group-title" }, "外观"),
+						h("div", { className: "ccx-group-hint" }, "浅色与深色各用一套主题；跟随系统时两套都需要配置。"),
+						h("div", { className: "ccx-cubes" }, MODE_CHOICES.map((choice) =>
 							h("button", {
 								key: choice.id,
 								type: "button",
-								className: "ccx-cube" + (flavor === choice.id ? " selected" : ""),
-								onClick: () => config.set("themeFlavor", choice.id),
+								className: "ccx-cube" + (mode === choice.id ? " selected" : ""),
+								onClick: () => { try { ctx.theme.setTheme(choice.id); } catch { /* theme service unavailable */ } },
 							},
 								h("span", { className: "ccx-cube-dots" },
-									choice.colors === null
+									choice.dots === null
 										? [
 											h("span", { key: "a", className: "ccx-cube-dot", style: { background: "linear-gradient(135deg,#eff1f5 50%,#1e1e2e 50%)" } }),
 											h("span", { key: "b", className: "ccx-cube-dot", style: { background: "#4169e1" } }),
 											h("span", { key: "c", className: "ccx-cube-dot", style: { background: "#888" } }),
 										]
-										: [
-											h("span", { key: "a", className: "ccx-cube-dot", style: { background: choice.colors.base, border: "1px solid " + choice.colors.surface2 } }),
-											h("span", { key: "b", className: "ccx-cube-dot", style: { background: choice.colors.blue } }),
-											h("span", { key: "c", className: "ccx-cube-dot", style: { background: choice.colors.mauve } }),
-										]),
+										: choice.dots.map((c, i) => h("span", { key: String(i), className: "ccx-cube-dot", style: { background: c, border: "1px solid rgba(128,128,128,.35)" } }))),
 								h("span", null, choice.label)),
 						)),
 					),
+					mode !== "dark" ? h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "浅色主题"),
+						h("div", { className: "ccx-cubes" }, LIGHT_THEME_CHOICES.map((choice) =>
+							themeCube(choice, lightFlavor, () => config.set("lightFlavor", choice.id)))),
+					) : null,
+					mode !== "light" ? h("div", { className: "ccx-group" },
+						h("div", { className: "ccx-group-title" }, "深色主题 · Catppuccin"),
+						h("div", { className: "ccx-cubes" }, DARK_THEME_CHOICES.map((choice) =>
+							themeCube(choice, darkFlavor, () => config.set("darkFlavor", choice.id)))),
+					) : null,
 					h("div", { className: "ccx-group" },
 						h("div", { className: "ccx-group-title" }, "背景图片"),
 						h("div", { className: "ccx-group-hint" }, "设置后主界面将呈现半透明毛玻璃质感，图片透过表面显示。"),

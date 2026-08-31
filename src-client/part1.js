@@ -7,7 +7,7 @@ window.__ModuleLoader__.load({
 
 		const React = require("react");
 		const h = React.createElement;
-		const { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore } = React;
+		const { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, useSyncExternalStore } = React;
 
 		//#region styles
 		const TAG_ID = "dsh-code/main.css";
