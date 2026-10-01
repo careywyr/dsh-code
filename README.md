@@ -74,13 +74,15 @@ Codex 风格体验插件：Catppuccin 主题、壁纸等各种自定义外观设
 
 ## 安装
 
-前置条件：已安装并运行过 `dsh`（`~/.dsh` 存在，web profile 已初始化）。
+前置条件：已安装并运行过 DeepSeek Harness（`~/.dsh` 存在，profile 已初始化）。
+支持 **网页端**（`dsh web`）和**桌面客户端**（DeepSeek Harness.app），安装脚本会
+自动发现并注册所有已存在的 profile。
 
 ```sh
 git clone git@github.com:careywyr/dsh-code.git
 cd dsh-code
 node install.mjs   # 自动完成链接与注册（幂等，可重复执行）
-# 重启 dsh web 服务，然后刷新浏览器
+# 重启 dsh（网页端重启 web 服务 / 桌面客户端退出重开）
 ```
 
 > 升级 dsh 导致 npx 缓存重建后，重跑 `node install.mjs` 即可恢复。
@@ -175,10 +177,11 @@ node install.mjs   # 自动清理旧的 dsh-codex-clone 注册并注册 dsh-code
 
 ## 卸载
 
-1. 删除 `~/.dsh/profiles/web/cordis.patch.yml` 中 `dsh-code` 的 insert 块；
+1. 删除每个 profile 的 `cordis.patch.yml`（如 `~/.dsh/profiles/web/`、
+   `~/.dsh/profiles/desktop/`）中 `dsh-code` 的 insert 块；
 2. 删除符号链接：`~/.dsh/profiles/node_modules/dsh-code` 与 dsh 安装树
    `node_modules/dsh-code`；
-3. 重启 `dsh web`。
+3. 重启 dsh（网页端重启 web 服务 / 桌面客户端退出重开）。
 
 ## 许可
 

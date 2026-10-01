@@ -6,7 +6,8 @@
  *    resolves `package.json` from the profile's baseUrl).
  * 2. Symlinks this package into the dsh installation's node_modules (the
  *    Loader's bare `import()` resolves from the install tree).
- * 3. Appends the loader row to the web profile's cordis.patch.yml.
+ * 3. Appends the loader row to every profile's cordis.patch.yml (web, desktop,
+ *    and any future profiles discovered under ~/.dsh/profiles/).
  *
  * Idempotent: re-running repairs drifted links and never duplicates the row.
  *
@@ -25,7 +26,7 @@ const PKG_NAME = 'dsh-code'
 const LEGACY_PKG_NAME = 'dsh-codex-clone'
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
 const PROFILES_MODULES = path.join(DSH_HOME, 'profiles', 'node_modules')
-const WEB_PATCH = path.join(DSH_HOME, 'profiles', 'web', 'cordis.patch.yml')
+const PROFILES_DIR = path.join(DSH_HOME, 'profiles')
 
 function fail(message) {
 	console.error(`install: ${message}`)
@@ -125,8 +126,10 @@ const installLink = path.join(installModules, PKG_NAME)
 console.log(`1) profile node_modules link: ${ensureSymlink(profileLink, PKG_DIR)} (${profileLink})`)
 console.log(`2) install node_modules link: ${ensureSymlink(installLink, PKG_DIR)} (${installLink})`)
 
-// ── 3: patch row ─────────────────────────────────────────────────────────────
-if (!existsSync(WEB_PATCH)) fail(`web profile patch not found at ${WEB_PATCH}`)
+// ── 3: patch row (all profiles) ──────────────────────────────────────────────
+// Discover every profile directory under ~/.dsh/profiles/ that contains a
+// cordis.patch.yml (web, desktop, and any future profiles). The shared
+// node_modules symlink (step 1) makes the client bundle visible to all of them.
 const ROW_ID = 'dsh-code'
 const INSERT_BLOCK = [
 	'',
@@ -150,24 +153,44 @@ function removeLegacyPatchRows(text) {
 	return { text, changed }
 }
 
-let patch = readFileSync(WEB_PATCH, 'utf8')
-const legacy = removeLegacyPatchRows(patch)
-if (legacy.changed) {
-	patch = legacy.text
-	writeFileSync(WEB_PATCH, patch)
-	console.log(`3) removed legacy ${LEGACY_PKG_NAME} rows from ${WEB_PATCH}`)
-}
-if (patch.includes(`id: ${ROW_ID}`)) {
-	console.log('3) patch row already present; skipped')
-} else {
-	const stripped = patch.replace(/#[^\n]*/g, '').trim()
-	if (stripped === '[]') {
-		patch = patch.replace(/\[\s*\]\s*$/, INSERT_BLOCK)
-	} else {
-		patch = patch.endsWith('\n') ? patch + INSERT_BLOCK : patch + '\n' + INSERT_BLOCK
+/** Ensure the dsh-code insert row exists in one profile's cordis.patch.yml. */
+function ensurePatchRow(patchFile, profileName) {
+	if (!existsSync(patchFile)) {
+		console.log(`3) ${profileName}: patch file not found at ${patchFile}; skipped`)
+		return
 	}
-	writeFileSync(WEB_PATCH, patch)
-	console.log(`3) patch row appended to ${WEB_PATCH}`)
+	let patch = readFileSync(patchFile, 'utf8')
+	const legacy = removeLegacyPatchRows(patch)
+	if (legacy.changed) {
+		patch = legacy.text
+		writeFileSync(patchFile, patch)
+		console.log(`3) ${profileName}: removed legacy ${LEGACY_PKG_NAME} rows`)
+	}
+	if (patch.includes(`id: ${ROW_ID}`)) {
+		console.log(`3) ${profileName}: patch row already present; skipped`)
+	} else {
+		const stripped = patch.replace(/#[^\n]*/g, '').trim()
+		if (stripped === '[]') {
+			patch = patch.replace(/\[\s*\]\s*$/, INSERT_BLOCK)
+		} else {
+			patch = patch.endsWith('\n') ? patch + INSERT_BLOCK : patch + '\n' + INSERT_BLOCK
+		}
+		writeFileSync(patchFile, patch)
+		console.log(`3) ${profileName}: patch row appended`)
+	}
 }
 
-console.log('\nDone. Restart the dsh web server and refresh the browser to activate the plugin.')
+// Discover profile directories (each direct child of profiles/ that has a
+// cordis.patch.yml is treated as a profile).
+let patchedCount = 0
+for (const entry of readdirSync(PROFILES_DIR)) {
+	const patchFile = path.join(PROFILES_DIR, entry, 'cordis.patch.yml')
+	if (entry === 'node_modules' || !existsSync(patchFile)) continue
+	ensurePatchRow(patchFile, entry)
+	patchedCount += 1
+}
+if (patchedCount === 0) {
+	fail(`no profile cordis.patch.yml found under ${PROFILES_DIR}; run dsh once to initialize a profile`)
+}
+
+console.log(`\nDone. Patched ${patchedCount} profile(s). Restart dsh (web server or desktop app) to activate the plugin.`)

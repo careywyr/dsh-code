@@ -12,8 +12,12 @@ window.__ModuleLoader__.load({
 		//#region styles
 		const TAG_ID = "dsh-code/main.css";
 		const CSS = `
-/* ── home layout: composer stack anchored to the bottom on the hero screen ── */
-[data-phase="hero"] > [data-conversation-scroll] {
+/* ── home layout: composer stack anchored to the bottom on the hero screen ──
+   DSH 0.1.x renders the scroll container as a child of the [data-phase] root;
+   0.2.x inserts a [data-conversation-content] body in between and repeats the
+   phase there, so both markers have to reach the scroll container. */
+[data-phase="hero"] > [data-conversation-scroll],
+[data-content-phase="hero"] > [data-conversation-scroll] {
 	justify-content: flex-end !important;
 	padding-bottom: 5vh;
 }
@@ -21,16 +25,38 @@ window.__ModuleLoader__.load({
 html.ccx-wallpaper, html.ccx-wallpaper body {
 	background-color: transparent !important;
 }
-/* ── wide chat mode: override DSH width variables ── */
+/* The layout frame / #root sit between <html> (which carries the wallpaper)
+   and the leaf surfaces; keep them transparent so the translucent token
+   overrides (--dsw-alias-bg-base / --dsw-specific-sidebar-fill, applied as
+   rgba by overrideTokens) composite directly over the wallpaper. Do NOT
+   force the sidebar column or the sidebar-fill variable transparent — the
+   column's own translucent fill IS the sidebar's wallpaper tint. */
+html.ccx-wallpaper #root,
+html.ccx-wallpaper [class*="_frame"] {
+	background-color: transparent !important;
+}
+/* macOS mixes sidebar-fill with transparent again and adds a gradient.
+   With wallpaper that halves the tint, exposing a much brighter image.
+   Use the same single surface as the center column on every platform. */
+html.ccx-wallpaper [class*="_frame"] > [class*="_sidebarCol"] {
+	background: var(--dsw-alias-bg-base) !important;
+}
+/* ── wide chat mode: override DSH width variables ──
+   A declaration on <html> only reaches elements that do not declare the
+   variable themselves, and DSH always declares them inside the conversation
+   subtree: on the [data-phase] root in 0.1.x, and on its
+   [data-conversation-content] body (plus the embedded variant) in 0.2.x.
+   Setting them on both markers covers every layout, and author !important
+   beats DSH's plain class rules whatever the stylesheet order — so this also
+   survives re-renders and session switches with no DOM scanning. */
 html.ccx-wide-chat {
 	--dsh-chat-content-width: 9999px !important;
 	--dsh-composer-card-max-width: 9999px !important;
 }
-/* Elements tagged by JS as having restrictive max-width */
-html.ccx-wide-chat [data-ccx-wide-target] {
-	max-width: none !important;
-	width: 100% !important;
-	box-sizing: border-box !important;
+html.ccx-wide-chat [data-phase],
+html.ccx-wide-chat [data-conversation-content] {
+	--dsh-chat-content-width: 9999px !important;
+	--dsh-composer-card-max-width: 9999px !important;
 }
 /* Add horizontal padding so content doesn't touch edges */
 html.ccx-wide-chat [data-conversation-scroll] {
